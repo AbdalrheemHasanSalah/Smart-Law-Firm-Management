@@ -4,12 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "db:init": "node backend/database/initialize.js",
+    "db:init": "npm --prefix backend run db:init",
     "start": "npm --prefix backend start",
     "dev:backend": "npm --prefix backend run dev"
-  },
-  "dependencies": {
-    "dotenv": "^18.0.5",
-    "pg": "^8.23.1"
   }
 }

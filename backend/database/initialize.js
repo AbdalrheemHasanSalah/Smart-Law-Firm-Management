@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { isIP } from 'node:net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
@@ -15,9 +16,136 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config({ path: path.resolve(process.cwd(), 'backend/.env') });
 dotenv.config();
 
+const APPROVED_REMOTE_SSL_MODE = 'verify-full';
+
+function normalizeHost(host) {
+  return host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+}
+
+function isLoopbackIpv6(host) {
+  if (isIP(host) !== 6) return false;
+
+  const halves = host.split('::');
+  if (halves.length > 2) return false;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves[1] ? halves[1].split(':') : [];
+  const groups = halves.length === 1
+    ? left
+    : [...left, ...Array(8 - left.length - right.length).fill('0'), ...right];
+
+  return groups.length === 8
+    && groups.slice(0, 7).every((group) => Number.parseInt(group || '0', 16) === 0)
+    && Number.parseInt(groups[7], 16) === 1;
+}
+
+function isLocalDatabaseHost(host) {
+  const normalizedHost = normalizeHost(host);
+  if (
+    normalizedHost.startsWith('/')
+    || normalizedHost === 'localhost'
+    || normalizedHost.endsWith('.localhost')
+  ) {
+    return true;
+  }
+
+  if (isIP(normalizedHost) === 4) {
+    return Number(normalizedHost.split('.')[0]) === 127;
+  }
+
+  return isLoopbackIpv6(normalizedHost);
+}
+
+function getUrlConnectionHost(parsed) {
+  const hostParameters = [];
+  for (const rawParameter of parsed.search.slice(1).split('&')) {
+    if (!rawParameter) continue;
+    const [parameter] = new URLSearchParams(rawParameter);
+    if (!parameter) continue;
+    const [name, value] = parameter;
+    if (name.toLowerCase() !== 'host') continue;
+    const rawName = rawParameter.split('=', 1)[0];
+    if (name !== 'host' || rawName !== 'host') {
+      throw new Error('DATABASE_URL must use the canonical host parameter name.');
+    }
+    hostParameters.push(value);
+  }
+
+  if (hostParameters.length > 1) {
+    throw new Error('DATABASE_URL must not contain duplicate host parameters.');
+  }
+  if (hostParameters.length === 1) {
+    if (!hostParameters[0].trim()) {
+      throw new Error('DATABASE_URL host parameter must not be empty.');
+    }
+    return hostParameters[0];
+  }
+  if (!parsed.hostname) {
+    throw new Error('DATABASE_URL must explicitly configure a database host.');
+  }
+  return parsed.hostname;
+}
+
+function assertSafeDatabaseUrl(connectionString, env, requireSslMode) {
+  let parsed;
+  try {
+    parsed = new URL(connectionString);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
+  }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
+  }
+  if (env.DB_SSL !== undefined && env.DB_SSL !== 'true') {
+    throw new Error('DB_SSL must be true when configured for a remote PostgreSQL URL.');
+  }
+
+  let sslModeCount = 0;
+  for (const rawParameter of parsed.search.slice(1).split('&')) {
+    if (!rawParameter) continue;
+    const parameters = [...new URLSearchParams(rawParameter)];
+    if (parameters.length !== 1) {
+      throw new Error('Remote DATABASE_URL contains an unsupported or unsafe SSL parameter.');
+    }
+    const [[name, value]] = parameters;
+    const lowerName = name.toLowerCase();
+    if (
+      !lowerName.startsWith('ssl')
+      && !lowerName.startsWith('tls')
+      && !lowerName.includes('libpqcompat')
+    ) {
+      continue;
+    }
+
+    const rawName = rawParameter.split('=', 1)[0];
+    const rawValue = rawParameter.includes('=')
+      ? rawParameter.slice(rawParameter.indexOf('=') + 1)
+      : '';
+    if (name !== 'sslmode' || rawName !== name) {
+      throw new Error('Remote DATABASE_URL contains an unsupported or unsafe SSL parameter.');
+    }
+    sslModeCount += 1;
+    if (value !== APPROVED_REMOTE_SSL_MODE || rawValue !== APPROVED_REMOTE_SSL_MODE) {
+      throw new Error('Remote DATABASE_URL must use sslmode=verify-full.');
+    }
+  }
+
+  if (sslModeCount > 1 || (requireSslMode && sslModeCount !== 1)) {
+    throw new Error('Remote DATABASE_URL must contain exactly one sslmode=verify-full parameter.');
+  }
+  if (sslModeCount === 1) {
+    parsed.searchParams.delete('sslmode');
+    return parsed.toString();
+  }
+  return connectionString;
+}
+
 export const EXPECTED_TABLES = [
   'roles',
+  'auth_users',
   'app_users',
+  'sessions',
+  'accounts',
+  'verifications',
   'lawyer_profiles',
   'clients',
   'courts',
@@ -43,8 +171,41 @@ export const EXPECTED_TABLES = [
 
 export const EXPECTED_ROLES = ['admin', 'lawyer', 'assistant', 'client'];
 
+const RESETTABLE_TABLES = [
+  'ai_interaction_sources',
+  'case_status_history',
+  'payments',
+  'ai_interactions',
+  'case_notes',
+  'invoices',
+  'contracts',
+  'legal_references',
+  'audit_logs',
+  'documents',
+  'tasks',
+  'hearings',
+  'appointments',
+  'messages',
+  'notifications',
+  'assigned_to',
+  'involves',
+  'legal_cases',
+  'lawyer_profiles',
+  'clients',
+  'accounts',
+  'sessions',
+  'verifications',
+  'app_users',
+  'auth_users',
+  'courts',
+  'roles',
+];
+
 export const EXPECTED_FOREIGN_KEYS = [
+  { table: 'app_users', column: 'auth_user_id', foreignTable: 'auth_users', foreignColumn: 'id' },
   { table: 'app_users', column: 'role_id', foreignTable: 'roles', foreignColumn: 'role_id' },
+  { table: 'sessions', column: 'user_id', foreignTable: 'auth_users', foreignColumn: 'id' },
+  { table: 'accounts', column: 'user_id', foreignTable: 'auth_users', foreignColumn: 'id' },
   { table: 'lawyer_profiles', column: 'user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
   { table: 'clients', column: 'user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
   { table: 'legal_cases', column: 'court_id', foreignTable: 'courts', foreignColumn: 'court_id' },
@@ -89,21 +250,54 @@ export const EXPECTED_FOREIGN_KEYS = [
 ];
 
 export function getDbConfig() {
-  if (process.env.DATABASE_URL) {
-    return {
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    };
+  const env = process.env;
+  const connectionString = env.DATABASE_URL;
+  let host;
+  if (connectionString) {
+    let parsed;
+    try {
+      parsed = new URL(connectionString);
+    } catch {
+      throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
+    }
+    if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+      throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
+    }
+    host = getUrlConnectionHost(parsed);
+  } else {
+    host = env.DB_HOST || env.PGHOST;
+    if (!host?.trim()) {
+      throw new Error('A PostgreSQL database host must be explicitly configured.');
+    }
+    host = host.trim();
   }
 
-  return {
-    host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
-    port: Number(process.env.DB_PORT || process.env.PGPORT || 5432),
-    user: process.env.DB_USER || process.env.PGUSER || 'postgres',
-    password: process.env.DB_PASSWORD ?? process.env.PGPASSWORD ?? '',
-    database: process.env.DB_NAME || process.env.PGDATABASE || 'smart_law_firm',
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  const remoteDatabase = !isLocalDatabaseHost(host);
+  if (remoteDatabase && !connectionString && env.DB_SSL !== 'true') {
+    throw new Error('DB_SSL=true is required for remote PostgreSQL connections.');
+  }
+
+  const config = {
+    port: Number(env.DB_PORT || env.PGPORT || 5432),
+    user: env.DB_USER || env.PGUSER || 'postgres',
+    password: env.DB_PASSWORD ?? env.PGPASSWORD ?? '',
+    database: env.DB_NAME || env.PGDATABASE || 'smart_law_firm',
+    ssl: remoteDatabase || env.DB_SSL === 'true'
+      ? { rejectUnauthorized: true }
+      : false,
   };
+
+  if (connectionString) {
+    config.connectionString = remoteDatabase
+      ? assertSafeDatabaseUrl(connectionString, env, true)
+      : env.DB_SSL === 'true'
+        ? assertSafeDatabaseUrl(connectionString, env, false)
+        : connectionString;
+  } else {
+    config.host = host;
+  }
+
+  return config;
 }
 
 export function findSchemaPath() {
@@ -276,6 +470,16 @@ export async function verifyDatabase(client) {
  * @param {boolean} [options.verify=true] - Whether to run verification before commit
  */
 export async function initializeDatabase(options = {}) {
+  if (options.reset && options.confirmDatabase !== 'smart_law_firm') {
+    throw new Error(
+      'Reset requires explicit confirmation with confirmDatabase: "smart_law_firm".'
+    );
+  }
+
+  if (!options.reset && options.confirmDatabase) {
+    throw new Error('confirmDatabase can only be used together with reset.');
+  }
+
   const schemaFile = options.schemaPath || findSchemaPath();
   console.log(`Using schema file: ${schemaFile}`);
   const rawSql = fs.readFileSync(schemaFile, 'utf8');
@@ -295,17 +499,56 @@ export async function initializeDatabase(options = {}) {
         client = await pool.connect();
         clientAcquiredFromPool = true;
       } else {
-        await ensureDatabaseExists(config);
+        if (!options.reset) {
+          await ensureDatabaseExists(config);
+        }
         client = new Client(config);
         ownedClient = true;
         await client.connect();
       }
     }
 
+    if (options.reset) {
+      const targetResult = await client.query(`
+        SELECT current_database() AS database,
+               host(inet_server_addr()) AS server_address,
+               inet_server_port() AS server_port
+      `);
+      const target = targetResult.rows[0];
+      const isLoopback = target.server_address === '::1' ||
+        target.server_address === '127.0.0.1' ||
+        target.server_address?.startsWith('127.');
+
+      if (
+        target.database !== options.confirmDatabase ||
+        target.server_port !== 5432 ||
+        !isLoopback
+      ) {
+        throw new Error(
+          `Refusing reset: connected target is ${target.database} at ${target.server_address}:${target.server_port}; expected smart_law_firm on localhost:5432.`
+        );
+      }
+
+      console.log(
+        `Explicit reset confirmed for ${target.database} at ${target.server_address}:${target.server_port}.`
+      );
+      console.log(`The following ${RESETTABLE_TABLES.length} public tables and their data will be dropped: ${RESETTABLE_TABLES.join(', ')}.`);
+    }
+
     console.log('Beginning initialization transaction...');
     await client.query('BEGIN');
 
     try {
+      if (options.reset) {
+        const tableList = RESETTABLE_TABLES
+          .map((table) => `public.${table}`)
+          .join(', ');
+        await client.query(`DROP TABLE IF EXISTS ${tableList}`);
+        await client.query(
+          'DROP FUNCTION IF EXISTS public.set_app_user_default_role()'
+        );
+      }
+
       console.log('Executing schema statements...');
       await client.query(schemaSql);
 
@@ -366,11 +609,36 @@ export async function initializeDatabase(options = {}) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
 
 if (isMain) {
-  initializeDatabase({ closePool: true })
+  const args = process.argv.slice(2);
+  const reset = args.includes('--reset');
+  const confirmArgument = args.find((argument) =>
+    argument.startsWith('--confirm-database=')
+  );
+  const confirmDatabase = confirmArgument?.split('=', 2)[1];
+
+  if (args.some((argument) =>
+    argument !== '--reset' && !argument.startsWith('--confirm-database=')
+  )) {
+    console.error(
+      'Usage: node database/initialize.js [--reset --confirm-database=smart_law_firm]'
+    );
+    process.exit(1);
+  } else if (reset !== Boolean(confirmDatabase)) {
+    console.error(
+      'Reset requires both --reset and --confirm-database=smart_law_firm.'
+    );
+    process.exit(1);
+  } else {
+    initializeDatabase({
+      closePool: true,
+      reset,
+      confirmDatabase,
+    })
     .then(() => {
       process.exit(0);
     })
     .catch(() => {
       process.exit(1);
     });
+  }
 }

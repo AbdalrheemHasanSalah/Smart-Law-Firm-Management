@@ -3,8 +3,13 @@ export function notFoundHandler(_request, response) {
 }
 
 export function errorHandler(error, _request, response, _next) {
-  console.error(error);
-  response.status(error.status || 500).json({
-    error: error.status ? error.message : 'Internal server error',
+  const status = Number.isInteger(error?.status) ? error.status : 500;
+  console.error('Request failed', {
+    name: typeof error?.name === 'string' ? error.name : 'Error',
+    status,
+    code: typeof error?.code === 'string' ? error.code : undefined,
+  });
+  response.status(status).json({
+    error: status >= 500 ? 'Internal server error' : error.message,
   });
 }

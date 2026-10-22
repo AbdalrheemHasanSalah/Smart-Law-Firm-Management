@@ -1,7 +1,7 @@
--- Enable UUID extension (Required for older Postgres versions, safe for new ones)
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- 1. Required extension
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 1. Roles (seed before users)
+-- 2. Roles
 CREATE TABLE IF NOT EXISTS roles (
     role_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     role_name VARCHAR(50) NOT NULL UNIQUE,
@@ -15,19 +15,70 @@ INSERT INTO roles (role_name, description) VALUES
     ('client', 'Client portal user')
 ON CONFLICT (role_name) DO NOTHING;
 
--- 2. Users
+-- 3. Better Auth identity and session storage
+CREATE TABLE IF NOT EXISTS auth_users (
+    id TEXT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    email VARCHAR(254) NOT NULL UNIQUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    image TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+    access_token TEXT,
+    refresh_token TEXT,
+    id_token TEXT,
+    access_token_expires_at TIMESTAMPTZ,
+    refresh_token_expires_at TIMESTAMPTZ,
+    scope TEXT,
+    password TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (provider_id, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS verifications (
+    id TEXT PRIMARY KEY,
+    identifier TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4. Business users and Better Auth mapping
 CREATE TABLE IF NOT EXISTS app_users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    auth_user_id TEXT UNIQUE REFERENCES auth_users(id) ON DELETE SET NULL,
     full_name VARCHAR(150) NOT NULL,
     email VARCHAR(254) NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     status VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'suspended')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     role_id UUID NOT NULL REFERENCES roles(role_id)
 );
 
--- 3. Lawyer profiles
+-- 5. Lawyer profiles, clients, and courts
 CREATE TABLE IF NOT EXISTS lawyer_profiles (
     lawyer_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bar_number VARCHAR(50) UNIQUE,
@@ -38,10 +89,10 @@ CREATE TABLE IF NOT EXISTS lawyer_profiles (
     user_id UUID NOT NULL UNIQUE REFERENCES app_users(user_id)
 );
 
--- 4. Clients
 CREATE TABLE IF NOT EXISTS clients (
     client_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    client_type VARCHAR(20) NOT NULL CHECK (client_type IN ('individual', 'organization')),
+    client_type VARCHAR(20) NOT NULL
+        CHECK (client_type IN ('individual', 'organization')),
     full_name_or_org VARCHAR(200) NOT NULL,
     phone VARCHAR(30),
     email VARCHAR(254),
@@ -50,7 +101,6 @@ CREATE TABLE IF NOT EXISTS clients (
     user_id UUID UNIQUE REFERENCES app_users(user_id)
 );
 
--- 5. Courts
 CREATE TABLE IF NOT EXISTS courts (
     court_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(150) NOT NULL,
@@ -75,7 +125,7 @@ CREATE TABLE IF NOT EXISTS legal_cases (
     CHECK (closed_at IS NULL OR closed_at >= opened_at)
 );
 
--- 7. Clients involved in cases (many-to-many)
+-- 7. Case participants and assignments
 CREATE TABLE IF NOT EXISTS involves (
     client_id UUID NOT NULL REFERENCES clients(client_id),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
@@ -84,7 +134,6 @@ CREATE TABLE IF NOT EXISTS involves (
     PRIMARY KEY (client_id, case_id)
 );
 
--- 8. Users assigned to cases (many-to-many)
 CREATE TABLE IF NOT EXISTS assigned_to (
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
@@ -94,7 +143,7 @@ CREATE TABLE IF NOT EXISTS assigned_to (
     PRIMARY KEY (user_id, case_id)
 );
 
--- 9. Notifications
+-- 8. Notifications and messages
 CREATE TABLE IF NOT EXISTS notifications (
     notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(200) NOT NULL,
@@ -105,7 +154,6 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 10. Messages
 CREATE TABLE IF NOT EXISTS messages (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     body TEXT NOT NULL,
@@ -118,7 +166,7 @@ CREATE TABLE IF NOT EXISTS messages (
     CHECK (sender_user_id <> receiver_user_id)
 );
 
--- 11. Appointments
+-- 9. Appointments, hearings, and tasks
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     starts_at TIMESTAMPTZ NOT NULL,
@@ -134,7 +182,6 @@ CREATE TABLE IF NOT EXISTS appointments (
     CHECK (ends_at > starts_at)
 );
 
--- 12. Hearings
 CREATE TABLE IF NOT EXISTS hearings (
     hearing_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     hearing_at TIMESTAMPTZ NOT NULL,
@@ -148,7 +195,6 @@ CREATE TABLE IF NOT EXISTS hearings (
     court_id UUID REFERENCES courts(court_id)
 );
 
--- 13. Tasks
 CREATE TABLE IF NOT EXISTS tasks (
     task_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(200) NOT NULL,
@@ -165,7 +211,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     CHECK (status <> 'completed' OR completed_at IS NOT NULL)
 );
 
--- 14. Documents
+-- 10. Documents, audit logs, and legal references
 CREATE TABLE IF NOT EXISTS documents (
     document_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     file_name VARCHAR(255) NOT NULL,
@@ -182,7 +228,6 @@ CREATE TABLE IF NOT EXISTS documents (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 15. Audit logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     audit_log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     action VARCHAR(100) NOT NULL,
@@ -194,7 +239,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     user_id UUID REFERENCES app_users(user_id)
 );
 
--- 16. Legal references
 CREATE TABLE IF NOT EXISTS legal_references (
     reference_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(250) NOT NULL,
@@ -206,7 +250,7 @@ CREATE TABLE IF NOT EXISTS legal_references (
     user_id UUID REFERENCES app_users(user_id)
 );
 
--- 17. Contracts
+-- 11. Contracts, invoices, and payments
 CREATE TABLE IF NOT EXISTS contracts (
     contract_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(200) NOT NULL,
@@ -221,7 +265,6 @@ CREATE TABLE IF NOT EXISTS contracts (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 18. Invoices
 CREATE TABLE IF NOT EXISTS invoices (
     invoice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
@@ -236,7 +279,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 19. Payments
 CREATE TABLE IF NOT EXISTS payments (
     payment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
@@ -249,7 +291,7 @@ CREATE TABLE IF NOT EXISTS payments (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 20. Case notes
+-- 12. Case notes
 CREATE TABLE IF NOT EXISTS case_notes (
     note_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     body TEXT NOT NULL,
@@ -261,7 +303,7 @@ CREATE TABLE IF NOT EXISTS case_notes (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- 21. AI interactions
+-- 13. AI interactions and their legal sources
 CREATE TABLE IF NOT EXISTS ai_interactions (
     interaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     question TEXT NOT NULL,
@@ -273,7 +315,6 @@ CREATE TABLE IF NOT EXISTS ai_interactions (
     document_id UUID REFERENCES documents(document_id)
 );
 
--- 22. AI interaction sources
 CREATE TABLE IF NOT EXISTS ai_interaction_sources (
     interaction_id UUID NOT NULL
         REFERENCES ai_interactions(interaction_id) ON DELETE CASCADE,
@@ -282,7 +323,7 @@ CREATE TABLE IF NOT EXISTS ai_interaction_sources (
     PRIMARY KEY (interaction_id, reference_id)
 );
 
--- 23. Case status history
+-- 14. Case status history
 CREATE TABLE IF NOT EXISTS case_status_history (
     history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     old_status VARCHAR(30)
@@ -295,7 +336,12 @@ CREATE TABLE IF NOT EXISTS case_status_history (
     user_id UUID NOT NULL REFERENCES app_users(user_id)
 );
 
--- Indexes
+-- 15. Query and foreign-key indexes
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_verifications_identifier ON verifications(identifier);
+
 CREATE INDEX IF NOT EXISTS idx_users_role ON app_users(role_id);
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_cases_court ON legal_cases(court_id);
