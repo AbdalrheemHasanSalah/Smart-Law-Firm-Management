@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --import ./test/setup.js --test test/session.test.js test/client.test.js test/case.test.js test/documents.test.js test/contracts.test.js test/caseNotes.test.js test/initializeConfig.test.js test/task.test.js test/unitTestIsolation.test.js test/securityConfig.test.js test/dbConfig.test.js test/originProtection.test.js test/user.test.js test/securityHeaders.test.js test/rateLimit.test.js test/errorHandler.test.js test/migrationRunner.test.js",
+    "test": "node --import ./test/setup.js --test test/session.test.js test/client.test.js test/case.test.js test/documents.test.js test/contracts.test.js test/caseNotes.test.js test/initializeConfig.test.js test/task.test.js test/securityConfig.test.js test/dbConfig.test.js test/originProtection.test.js test/user.test.js test/securityHeaders.test.js test/rateLimit.test.js test/errorHandler.test.js test/migrationRunner.test.js && npm run test:unit-isolation",
+    "test:unit-isolation": "node --import ./test/unitTestIsolationSetup.js --test test/unitTestIsolation.test.js",
     "test:case-assignment-unit": "node --import ./test/caseAssignmentUnitSetup.js --test test/caseAssignment.service.test.js",
     "test:client-account-linking": "node --import ./test/setup.js --test test/clientAccountLinking.test.js",
     "test:integration": "node --test --test-concurrency=1 test/auth.integration.test.js test/userManagement.integration.test.js",
