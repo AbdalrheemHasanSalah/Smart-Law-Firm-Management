@@ -13,11 +13,19 @@ test('unit tests fail closed if any PostgreSQL connection or query is attempted'
     () => client.connect(),
     /PostgreSQL connections are disabled during backend unit tests/
   );
+  assert.throws(
+    () => pg.Client.prototype.query.call(client, 'SELECT 1'),
+    /PostgreSQL queries are disabled during backend unit tests/
+  );
 
   const driverPool = new pg.Pool();
   assert.throws(
     () => driverPool.connect(),
     /PostgreSQL connections are disabled during backend unit tests/
+  );
+  assert.throws(
+    () => pg.Pool.prototype.query.call(driverPool, 'SELECT 1'),
+    /PostgreSQL queries are disabled during backend unit tests/
   );
   await driverPool.end();
 
