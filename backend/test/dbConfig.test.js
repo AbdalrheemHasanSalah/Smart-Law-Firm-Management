@@ -9,6 +9,7 @@ function remoteDiscreteConfig(NODE_ENV, DB_SSL) {
   return {
     NODE_ENV,
     DB_HOST: 'db.example.test',
+    DB_USER: 'test-user',
     DB_PASSWORD: 'test-only',
     DB_NAME: 'smart_law_firm',
     ...(DB_SSL === undefined ? {} : { DB_SSL }),
@@ -51,6 +52,37 @@ test('remote DATABASE_URL requires and sanitizes canonical verified TLS', () => 
   const sanitizedUrl = new URL(config.connectionString);
   assert.equal(sanitizedUrl.searchParams.has('sslmode'), false);
   assert.equal(sanitizedUrl.searchParams.get('application_name'), 'unit-test');
+});
+
+test('DATABASE_URL takes precedence over conflicting discrete settings', () => {
+  const config = getDatabaseConfig({
+    ...remoteUrl(),
+    DB_HOST: 'localhost',
+    DB_USER: 'discrete-user',
+    DB_PASSWORD: 'discrete-password',
+    DB_NAME: 'discrete_database',
+  });
+
+  assert.equal(
+    config.connectionString,
+    'postgresql://test-user@db.example.test:5432/smart_law_firm'
+  );
+  assert.deepEqual(config.ssl, { rejectUnauthorized: true });
+  for (const field of ['host', 'user', 'password', 'database']) {
+    assert.equal(Object.hasOwn(config, field), false);
+  }
+});
+
+test('DATABASE_URL requires an explicit non-empty username', () => {
+  for (const DATABASE_URL of [
+    'postgresql://db.example.test:5432/smart_law_firm?sslmode=verify-full',
+    'postgresql://@db.example.test:5432/smart_law_firm?sslmode=verify-full',
+  ]) {
+    assert.throws(
+      () => getDatabaseConfig({ DATABASE_URL }),
+      /DATABASE_URL must include an explicit, non-empty username/
+    );
+  }
 });
 
 test('remote DATABASE_URL rejects missing, weak, and insecure TLS modes', () => {
@@ -117,14 +149,14 @@ test('remote DATABASE_URL rejects contradictory DB_SSL configuration', () => {
 
 test('URL host overrides are classified by their effective host', () => {
   const remoteHostOverride = getDatabaseConfig({
-    DATABASE_URL: 'postgresql://localhost:5432/smart_law_firm?host=db.example.test&sslmode=verify-full',
+    DATABASE_URL: 'postgresql://unit-test-user@localhost:5432/smart_law_firm?host=db.example.test&sslmode=verify-full',
   });
   assert.deepEqual(remoteHostOverride.ssl, { rejectUnauthorized: true });
   assert.equal(new URL(remoteHostOverride.connectionString).searchParams.has('sslmode'), false);
 
   assert.throws(
     () => getDatabaseConfig({
-      DATABASE_URL: 'postgresql://localhost:5432/smart_law_firm?host=localhost&host=db.example.test',
+      DATABASE_URL: 'postgresql://unit-test-user@localhost:5432/smart_law_firm?host=localhost&host=db.example.test',
     }),
     /duplicate host parameters/
   );
@@ -142,6 +174,7 @@ test('local development PostgreSQL loopback hosts do not require TLS', () => {
     const config = getDatabaseConfig({
       NODE_ENV: 'development',
       DB_HOST,
+      DB_USER: 'test-user',
       DB_PASSWORD: 'test-only',
       DB_NAME: 'smart_law_firm',
     });
@@ -155,6 +188,7 @@ test('local Unix-socket connections do not require TLS', () => {
   const config = getDatabaseConfig({
     NODE_ENV: 'development',
     DB_HOST: '/var/run/postgresql',
+    DB_USER: 'test-user',
     DB_PASSWORD: 'test-only',
     DB_NAME: 'smart_law_firm',
   });
@@ -166,15 +200,15 @@ test('local Unix-socket connections do not require TLS', () => {
 test('local DATABASE_URL connections remain usable without TLS', () => {
   const config = getDatabaseConfig({
     NODE_ENV: 'development',
-    DATABASE_URL: 'postgresql://localhost:5432/smart_law_firm',
+    DATABASE_URL: 'postgresql://unit-test-user@localhost:5432/smart_law_firm',
   });
 
-  assert.equal(config.connectionString, 'postgresql://localhost:5432/smart_law_firm');
+  assert.equal(config.connectionString, 'postgresql://unit-test-user@localhost:5432/smart_law_firm');
   assert.equal(config.ssl, undefined);
 });
 
 test('local DATABASE_URL Unix-socket hosts remain usable without TLS', () => {
-  const connectionString = 'postgresql://localhost:5432/smart_law_firm?host=%2Fvar%2Frun%2Fpostgresql';
+  const connectionString = 'postgresql://unit-test-user@localhost:5432/smart_law_firm?host=%2Fvar%2Frun%2Fpostgresql';
   const config = getDatabaseConfig({ DATABASE_URL: connectionString });
 
   assert.equal(config.connectionString, connectionString);
@@ -185,6 +219,7 @@ test('missing hosts fail closed and unrecognized hosts require TLS', () => {
   assert.throws(
     () => getDatabaseConfig({
       NODE_ENV: 'development',
+      DB_USER: 'test-user',
       DB_PASSWORD: 'test-only',
       DB_NAME: 'smart_law_firm',
     }),
@@ -201,8 +236,42 @@ test('missing hosts fail closed and unrecognized hosts require TLS', () => {
 
   assert.throws(
     () => getDatabaseConfig({
-      DATABASE_URL: 'postgresql://unrecognized-host:5432/smart_law_firm',
+      DATABASE_URL: 'postgresql://unit-test-user@unrecognized-host:5432/smart_law_firm',
     }),
     /sslmode=verify-full/
   );
+});
+
+test('discrete PostgreSQL configuration requires an explicit nonblank DB_USER', () => {
+  for (const missingUser of [
+    {},
+    { DB_USER: '' },
+    { DB_USER: '   ' },
+  ]) {
+    assert.throws(
+      () => getDatabaseConfig({
+        NODE_ENV: 'development',
+        DB_HOST: 'localhost',
+        DB_PASSWORD: 'test-only',
+        PGUSER: 'legacy-user',
+        ...missingUser,
+      }),
+      /DB_USER must be explicitly configured when DATABASE_URL is not set/
+    );
+  }
+});
+
+test('discrete PostgreSQL configuration rejects surrounding DB_USER whitespace', () => {
+  for (const DB_USER of [' test-user', 'test-user ']) {
+    assert.throws(
+      () => getDatabaseConfig({
+        NODE_ENV: 'development',
+        DB_HOST: 'localhost',
+        DB_USER,
+        DB_PASSWORD: 'test-only',
+        DB_NAME: 'smart_law_firm',
+      }),
+      /DB_USER must not contain leading or trailing whitespace/
+    );
+  }
 });

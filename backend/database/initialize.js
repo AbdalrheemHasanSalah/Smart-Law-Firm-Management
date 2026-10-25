@@ -263,8 +263,17 @@ export function getDbConfig() {
     if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
       throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
     }
+    if (!parsed.username.trim()) {
+      throw new Error('DATABASE_URL must include an explicit, non-empty username.');
+    }
     host = getUrlConnectionHost(parsed);
   } else {
+    if (!env.DB_USER?.trim()) {
+      throw new Error('DB_USER must be explicitly configured when DATABASE_URL is not set.');
+    }
+    if (env.DB_USER !== env.DB_USER.trim()) {
+      throw new Error('DB_USER must not contain leading or trailing whitespace.');
+    }
     host = env.DB_HOST || env.PGHOST;
     if (!host?.trim()) {
       throw new Error('A PostgreSQL database host must be explicitly configured.');
@@ -278,10 +287,6 @@ export function getDbConfig() {
   }
 
   const config = {
-    port: Number(env.DB_PORT || env.PGPORT || 5432),
-    user: env.DB_USER || env.PGUSER || 'postgres',
-    password: env.DB_PASSWORD ?? env.PGPASSWORD ?? '',
-    database: env.DB_NAME || env.PGDATABASE || 'smart_law_firm',
     ssl: remoteDatabase || env.DB_SSL === 'true'
       ? { rejectUnauthorized: true }
       : false,
@@ -294,6 +299,10 @@ export function getDbConfig() {
         ? assertSafeDatabaseUrl(connectionString, env, false)
         : connectionString;
   } else {
+    config.port = Number(env.DB_PORT || env.PGPORT || 5432);
+    config.user = env.DB_USER;
+    config.password = env.DB_PASSWORD ?? env.PGPASSWORD ?? '';
+    config.database = env.DB_NAME || env.PGDATABASE || 'smart_law_firm';
     config.host = host;
   }
 

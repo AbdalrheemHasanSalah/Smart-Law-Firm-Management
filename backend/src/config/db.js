@@ -104,6 +104,9 @@ function getDatabaseHost(env) {
     if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
       throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
     }
+    if (!parsed.username.trim()) {
+      throw new Error('DATABASE_URL must include an explicit, non-empty username.');
+    }
     return getUrlConnectionHost(parsed);
   }
 
@@ -150,12 +153,15 @@ function assertSafeDatabaseUrl(connectionString, env, requireSslMode) {
     }
 
     sslModeCount += 1;
+    if (sslModeCount > 1) {
+      throw new Error('Remote DATABASE_URL contains an unsupported or unsafe SSL parameter.');
+    }
     if (value !== APPROVED_REMOTE_SSL_MODE || rawValue !== APPROVED_REMOTE_SSL_MODE) {
       throw new Error('Remote DATABASE_URL must use sslmode=verify-full.');
     }
   }
 
-  if (sslModeCount > 1 || (requireSslMode && sslModeCount !== 1)) {
+  if (requireSslMode && sslModeCount !== 1) {
     throw new Error('Remote DATABASE_URL must contain exactly one sslmode=verify-full parameter.');
   }
 
@@ -168,6 +174,13 @@ function assertSafeDatabaseUrl(connectionString, env, requireSslMode) {
 
 export function getDatabaseConfig(env = process.env) {
   const connectionString = env.DATABASE_URL;
+  if (!connectionString && !env.DB_USER?.trim()) {
+    throw new Error('DB_USER must be explicitly configured when DATABASE_URL is not set.');
+  }
+  if (!connectionString && env.DB_USER && env.DB_USER !== env.DB_USER.trim()) {
+    throw new Error('DB_USER must not contain leading or trailing whitespace.');
+  }
+
   const host = getDatabaseHost(env);
   const remoteDatabase = !isLocalDatabaseHost(host);
 
@@ -200,8 +213,7 @@ export function getDatabaseConfig(env = process.env) {
       env.DB_PORT || env.PGPORT || 5432
     );
 
-    config.user =
-      env.DB_USER || env.PGUSER || 'postgres';
+    config.user = env.DB_USER;
 
     config.password =
       env.DB_PASSWORD ??
