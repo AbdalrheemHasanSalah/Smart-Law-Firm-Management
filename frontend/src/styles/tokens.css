@@ -1,0 +1,104 @@
+/*
+ * Qadiyati design tokens
+ * ----------------------
+ * Primitives are sampled from the brand palette (Image 2):
+ *   #2b372d deep forest · #4a4e40 olive · #655d4d umber · #9b6229 bronze · #ba997e champagne
+ * and extended with ivory / charcoal tones requested in the brief.
+ * Semantic tokens below are what components consume; they switch per theme.
+ */
+:root {
+  /* ---- primitives ---- */
+  --forest-950: #121915;
+  --forest-900: #19221c;
+  --forest-800: #212c24;
+  --forest-700: #2b372d; /* palette */
+  --forest-600: #3b4a3e;
+  --olive-600: #4a4e40; /* palette */
+  --umber-500: #655d4d; /* palette */
+  --bronze-600: #9b6229; /* palette */
+  --champagne-400: #ba997e; /* palette */
+  --champagne-300: #cdb293;
+  --champagne-200: #e3d0b6;
+  --ivory-50: #faf7f1;
+  --ivory-100: #f3eee4;
+  --ivory-200: #e8e0d1;
+  --charcoal-900: #22241f;
+
+  --font-body-en: 'Inter Variable', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-body-ar: 'IBM Plex Sans Arabic', 'Inter Variable', system-ui, sans-serif;
+  --font-heading-en: 'Playfair Display Variable', 'Amiri', Georgia, serif;
+  --font-heading-ar: 'Amiri', 'Playfair Display Variable', serif;
+  --font-body: var(--font-body-ar);
+  --font-heading: var(--font-heading-ar);
+
+  /* ---- semantic: light ---- */
+  color-scheme: light;
+  --background: var(--ivory-50);
+  --foreground: var(--charcoal-900);
+  --surface: #ffffff;
+  --surface-muted: var(--ivory-100);
+  --surface-raised: #ffffff;
+  --heading: var(--forest-700);
+  --muted-foreground: #6b6354;
+  --border: #e4dccd;
+  --border-strong: #d3c6b1;
+  --input: #d9cdb9;
+  --ring: #a87a48;
+
+  --primary: var(--forest-700);
+  --primary-hover: var(--forest-800);
+  --primary-foreground: var(--ivory-50);
+  --accent: #8a5622; /* bronze, darkened slightly for AA text contrast on ivory */
+  --accent-soft: color-mix(in oklab, var(--champagne-400) 28%, transparent);
+  --accent-foreground: #ffffff;
+  --gold: var(--champagne-400);
+
+  --destructive: #a1392d;
+  --destructive-soft: #f7e7e3;
+  --success: #3d6a49;
+  --success-soft: #e6efe7;
+  --warning: #9b6229;
+
+  --shadow-soft: 0 1px 2px rgb(43 55 45 / 0.04), 0 4px 16px -4px rgb(43 55 45 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(43 55 45 / 0.06), 0 14px 32px -10px rgb(43 55 45 / 0.25);
+  --shadow-gold: 0 10px 28px -12px rgb(155 98 41 / 0.55);
+}
+
+:root[lang='en'] {
+  --font-body: var(--font-body-en);
+  --font-heading: var(--font-heading-en);
+}
+
+/* ---- semantic: dark ---- */
+:root.dark {
+  color-scheme: dark;
+  --background: var(--forest-950);
+  --foreground: #e9e3d6;
+  --surface: #18211b;
+  --surface-muted: #1f2a22;
+  --surface-raised: #223026;
+  --heading: #f3ecde;
+  --muted-foreground: #b0a792;
+  --border: #2f3b33;
+  --border-strong: #3d4b41;
+  --input: #3a483e;
+  --ring: var(--champagne-300);
+
+  --primary: var(--champagne-300);
+  --primary-hover: var(--champagne-200);
+  --primary-foreground: var(--forest-950);
+  --accent: var(--champagne-300);
+  --accent-soft: color-mix(in oklab, var(--champagne-400) 18%, transparent);
+  --accent-foreground: var(--forest-950);
+  --gold: var(--champagne-300);
+
+  --destructive: #e08a7c;
+  --destructive-soft: rgb(161 57 45 / 0.18);
+  --success: #8fbf9a;
+  --success-soft: rgb(61 106 73 / 0.25);
+  --warning: var(--champagne-300);
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.4);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.35), 0 16px 36px -12px rgb(0 0 0 / 0.6);
+  --shadow-gold: 0 10px 30px -12px rgb(205 178 147 / 0.4);
+}

@@ -1,0 +1,13 @@
+{
+  "required": "This field is required.",
+  "email": "Please enter a valid email address.",
+  "emailTooLong": "Email must be at most {{max}} characters.",
+  "passwordMin": "Password must be at least {{min}} characters.",
+  "tooLong": "Must be at most {{max}} characters.",
+  "passwordLetter": "Password must include at least one letter.",
+  "passwordDigit": "Password must include at least one number.",
+  "passwordMismatch": "Passwords do not match.",
+  "phone": "Please enter a valid phone number.",
+  "yearsRange": "Enter a whole number between 0 and {{max}}.",
+  "confirmAccuracy": "Please confirm the details before submitting."
+}
