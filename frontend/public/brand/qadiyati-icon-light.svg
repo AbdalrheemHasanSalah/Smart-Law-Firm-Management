@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Qadiyati">
+  <g transform="translate(0 0) scale(1)">
+    <path d="M10 9h13.5c1.4 0 2.7.6 3.6 1.7L30 14h24c4.4 0 8 3.6 8 8v30c0 4.4-3.6 8-8 8H10c-4.4 0-8-3.6-8-8V17c0-4.4 3.6-8 8-8Z" fill="#e3d0b6"/>
+    <circle cx="38.5" cy="34.5" r="5.5" fill="none" stroke="#19221c" stroke-width="4.2"/>
+    <path d="M44 34.5v6.5a12 12 0 0 1-24 0v-3.5" fill="none" stroke="#19221c" stroke-width="4.2" stroke-linecap="round"/>
+    <rect x="32.3" y="19.3" width="4.4" height="4.4" rx="0.6" transform="rotate(45 34.5 21.5)" fill="#9b6229"/>
+    <rect x="40.3" y="19.3" width="4.4" height="4.4" rx="0.6" transform="rotate(45 42.5 21.5)" fill="#9b6229"/>
+  </g>
+</svg>
