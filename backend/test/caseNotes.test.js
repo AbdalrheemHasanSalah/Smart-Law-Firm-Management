@@ -9,6 +9,7 @@ const { default: app } = await import('../src/app.js');
 
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const noteId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
 const otherAuthUserId = 'other-auth-user-id';
@@ -28,6 +29,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const noteRecord = {
@@ -112,7 +114,7 @@ test('admins can list notes with bounded pagination and safe fields', async (t) 
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.doesNotMatch(sql, /SELECT \*/i);
     if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ total: 1 }] };
-    assert.deepEqual(parameters, [caseId, '%review%', 50, 50]);
+    assert.deepEqual(parameters, [caseId, officeId, '%review%', 50, 50]);
     return { rowCount: 1, rows: [{ ...noteRecord, user_id: appUserId }] };
   });
   const response = await request('GET', `/api/cases/${caseId}/notes?page=2&pageSize=100&search=review`);
@@ -257,7 +259,7 @@ test('only admins can publish notes to clients', async (t) => {
   }
   const adminCalls = setupRequest(t, 'admin', async (sql, parameters) => {
     if (sql.includes('INSERT INTO case_notes')) {
-      assert.deepEqual(parameters, ['Public note', 'client_visible', appUserId, caseId]);
+      assert.deepEqual(parameters, ['Public note', 'client_visible', appUserId, caseId, officeId, true]);
       return { rowCount: 1, rows: [{ ...noteRecord, body: 'Public note', visibility: 'client_visible' }] };
     }
     return { rowCount: 0, rows: [] };
@@ -305,7 +307,7 @@ test('admins can update note content and visibility with parameterized SQL', asy
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /UPDATE case_notes AS n/);
     assert.match(sql, /updated_at = NOW\(\)/);
-    assert.deepEqual(parameters, ['Published note', 'client_visible', noteId]);
+    assert.deepEqual(parameters, ['Published note', 'client_visible', noteId, officeId]);
     return { rowCount: 1, rows: [{ ...noteRecord, body: 'Published note', visibility: 'client_visible' }] };
   });
 

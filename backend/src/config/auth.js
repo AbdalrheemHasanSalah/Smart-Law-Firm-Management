@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { kyselyAdapter } from '@better-auth/kysely-adapter';
 import { toNodeHandler } from 'better-auth/node';
 import { Kysely, PostgresDialect, sql } from 'kysely';
@@ -15,6 +16,21 @@ if (!secret || secret.length < 32) {
 const isUnitTest = process.env.NODE_ENV === 'test'
   && process.env.LAW_FIRM_UNIT_TEST_MODE === 'true';
 const securityConfig = getSecurityConfig();
+
+const RESET_TOKEN_TTL_SECONDS = 60 * 60;
+
+/**
+ * No mail transport is configured in this project yet. Outside production the reset link is
+ * written to the server console so the flow can be exercised locally; in production the
+ * request succeeds silently until a real mailer replaces this function.
+ */
+async function sendResetPassword({ user, url }) {
+  if (securityConfig.production) {
+    console.warn('Password reset requested but no mail transport is configured.');
+    return;
+  }
+  console.info(`[dev mail] Password reset link for ${user.email}: ${url}`);
+}
 
 const db = isUnitTest
   ? null
@@ -136,8 +152,13 @@ function createAtomicAuthAdapter(rootDb) {
                   WHERE auth_user_id = ${sessionUserId}
                   FOR UPDATE`.compile(db)
             );
+            // Runs on the session's own transaction (after the password check), so a stable
+            // code can be returned without revealing account status to unauthenticated callers.
             if (account.rows[0]?.status !== 'active') {
-              throw new Error('Better Auth cannot create a session for an inactive account.');
+              throw new APIError('FORBIDDEN', {
+                code: 'ACCOUNT_INACTIVE',
+                message: 'This account is inactive or suspended.',
+              });
             }
           }
 
@@ -190,6 +211,9 @@ export const auth = isUnitTest
     minPasswordLength: 8,
     autoSignIn: true,
     requireEmailVerification: false,
+    sendResetPassword,
+    resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_SECONDS,
+    revokeSessionsOnPasswordReset: true,
   },
   user: {
     modelName: 'auth_users',

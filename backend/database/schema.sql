@@ -2,6 +2,8 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 2. Roles
+-- Role names are reused as office-membership roles: 'admin' is the administrator of one
+-- law office. Platform-wide administration is the separate app_users.is_platform_admin flag.
 CREATE TABLE IF NOT EXISTS roles (
     role_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     role_name VARCHAR(50) NOT NULL UNIQUE,
@@ -9,7 +11,7 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 INSERT INTO roles (role_name, description) VALUES
-    ('admin', 'System administrator'),
+    ('admin', 'Law office administrator'),
     ('lawyer', 'Lawyer or attorney'),
     ('assistant', 'Law firm assistant or staff member'),
     ('client', 'Client portal user')
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS verifications (
 );
 
 -- 4. Business users and Better Auth mapping
+-- role_id is retained for compatibility; authorization uses office_memberships.role_id.
 CREATE TABLE IF NOT EXISTS app_users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     auth_user_id TEXT UNIQUE REFERENCES auth_users(id) ON DELETE SET NULL,
@@ -73,12 +76,52 @@ CREATE TABLE IF NOT EXISTS app_users (
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     status VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'suspended')),
+    is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     role_id UUID NOT NULL REFERENCES roles(role_id)
 );
 
--- 5. Lawyer profiles, clients, and courts
+-- 5. Law offices (tenants), memberships, and invitations
+CREATE TABLE IF NOT EXISTS law_offices (
+    office_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(200) NOT NULL,
+    email VARCHAR(254),
+    phone VARCHAR(30),
+    city VARCHAR(100),
+    address TEXT,
+    license_number VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'rejected', 'suspended')),
+    review_note TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewed_by_user_id UUID REFERENCES app_users(user_id),
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS office_memberships (
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    role_id UUID NOT NULL REFERENCES roles(role_id),
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'suspended')),
+    is_owner BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (office_id, user_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS office_memberships_one_owner
+    ON office_memberships(office_id) WHERE is_owner;
+
+-- The office chosen for a session is stored server-side and re-validated on every request.
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS active_office_id UUID REFERENCES law_offices(office_id) ON DELETE SET NULL;
+
+-- 6. Lawyer profiles, clients, and courts
+-- A lawyer profile describes the person, so it stays platform-wide across offices.
 CREATE TABLE IF NOT EXISTS lawyer_profiles (
     lawyer_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bar_number VARCHAR(50) UNIQUE,
@@ -89,6 +132,7 @@ CREATE TABLE IF NOT EXISTS lawyer_profiles (
     user_id UUID NOT NULL UNIQUE REFERENCES app_users(user_id)
 );
 
+-- A client record belongs to one office. The same person may hold a record in several offices.
 CREATE TABLE IF NOT EXISTS clients (
     client_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_type VARCHAR(20) NOT NULL
@@ -98,9 +142,33 @@ CREATE TABLE IF NOT EXISTS clients (
     email VARCHAR(254),
     address TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id UUID UNIQUE REFERENCES app_users(user_id)
+    user_id UUID REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT clients_office_client_key UNIQUE (office_id, client_id),
+    CONSTRAINT clients_office_user_key UNIQUE (office_id, user_id),
+    CONSTRAINT clients_office_member_fkey FOREIGN KEY (office_id, user_id)
+        REFERENCES office_memberships(office_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS office_invitations (
+    invitation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    email VARCHAR(254) NOT NULL,
+    role_id UUID NOT NULL REFERENCES roles(role_id),
+    client_id UUID,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    invited_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    accepted_at TIMESTAMPTZ,
+    accepted_by_user_id UUID REFERENCES app_users(user_id),
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT office_invitations_client_fkey FOREIGN KEY (office_id, client_id)
+        REFERENCES clients(office_id, client_id),
+    CHECK (accepted_at IS NULL OR revoked_at IS NULL)
+);
+
+-- Courts are shared reference data across all offices.
 CREATE TABLE IF NOT EXISTS courts (
     court_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(150) NOT NULL,
@@ -108,10 +176,10 @@ CREATE TABLE IF NOT EXISTS courts (
     court_type VARCHAR(50)
 );
 
--- 6. Legal cases
+-- 7. Legal cases
 CREATE TABLE IF NOT EXISTS legal_cases (
     case_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_number VARCHAR(50) NOT NULL UNIQUE,
+    case_number VARCHAR(50) NOT NULL,
     title VARCHAR(200) NOT NULL,
     case_type VARCHAR(50) NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'open'
@@ -122,16 +190,23 @@ CREATE TABLE IF NOT EXISTS legal_cases (
     closed_at TIMESTAMPTZ,
     description TEXT,
     court_id UUID REFERENCES courts(court_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT legal_cases_office_case_key UNIQUE (office_id, case_id),
+    CONSTRAINT legal_cases_office_number_key UNIQUE (office_id, case_number),
     CHECK (closed_at IS NULL OR closed_at >= opened_at)
 );
 
--- 7. Case participants and assignments
+-- 8. Case participants and assignments
+-- Composite (office_id, ...) foreign keys make cross-office links impossible at the database level.
 CREATE TABLE IF NOT EXISTS involves (
     client_id UUID NOT NULL REFERENCES clients(client_id),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
     party_role VARCHAR(50) NOT NULL DEFAULT 'client',
     is_primary BOOLEAN NOT NULL DEFAULT FALSE,
-    PRIMARY KEY (client_id, case_id)
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    PRIMARY KEY (client_id, case_id),
+    FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
 CREATE TABLE IF NOT EXISTS assigned_to (
@@ -140,10 +215,13 @@ CREATE TABLE IF NOT EXISTS assigned_to (
     assignment_role VARCHAR(50) NOT NULL DEFAULT 'lawyer',
     assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_lead BOOLEAN NOT NULL DEFAULT FALSE,
-    PRIMARY KEY (user_id, case_id)
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    PRIMARY KEY (user_id, case_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
 );
 
--- 8. Notifications and messages
+-- 9. Notifications and messages
 CREATE TABLE IF NOT EXISTS notifications (
     notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(200) NOT NULL,
@@ -151,7 +229,9 @@ CREATE TABLE IF NOT EXISTS notifications (
     notification_type VARCHAR(50) NOT NULL,
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -163,10 +243,14 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_user_id UUID NOT NULL REFERENCES app_users(user_id),
     receiver_user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID REFERENCES legal_cases(case_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, sender_user_id) REFERENCES office_memberships(office_id, user_id),
+    FOREIGN KEY (office_id, receiver_user_id) REFERENCES office_memberships(office_id, user_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
     CHECK (sender_user_id <> receiver_user_id)
 );
 
--- 9. Appointments, hearings, and tasks
+-- 10. Appointments, hearings, and tasks
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     starts_at TIMESTAMPTZ NOT NULL,
@@ -179,6 +263,10 @@ CREATE TABLE IF NOT EXISTS appointments (
     client_id UUID NOT NULL REFERENCES clients(client_id),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID REFERENCES legal_cases(case_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
     CHECK (ends_at > starts_at)
 );
 
@@ -192,7 +280,9 @@ CREATE TABLE IF NOT EXISTS hearings (
         CHECK (status IN ('scheduled', 'completed', 'postponed', 'cancelled')),
     notes TEXT,
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
-    court_id UUID REFERENCES courts(court_id)
+    court_id UUID REFERENCES courts(court_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -208,10 +298,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     case_id UUID REFERENCES legal_cases(case_id),
     assigned_to_user_id UUID NOT NULL REFERENCES app_users(user_id),
     created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    FOREIGN KEY (office_id, assigned_to_user_id) REFERENCES office_memberships(office_id, user_id),
+    FOREIGN KEY (office_id, created_by_user_id) REFERENCES office_memberships(office_id, user_id),
     CHECK (status <> 'completed' OR completed_at IS NOT NULL)
 );
 
--- 10. Documents, audit logs, and legal references
+-- 11. Documents, audit logs, and legal references
 CREATE TABLE IF NOT EXISTS documents (
     document_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     file_name VARCHAR(255) NOT NULL,
@@ -225,9 +319,14 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
     client_id UUID REFERENCES clients(client_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT documents_office_document_key UNIQUE (office_id, document_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id)
 );
 
+-- office_id is nullable: platform-level actions (office review) are not tied to one tenant.
 CREATE TABLE IF NOT EXISTS audit_logs (
     audit_log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     action VARCHAR(100) NOT NULL,
@@ -236,9 +335,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details JSONB,
     ip_address INET,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id UUID REFERENCES app_users(user_id)
+    user_id UUID REFERENCES app_users(user_id),
+    office_id UUID REFERENCES law_offices(office_id)
 );
 
+-- Legal references are a shared library across all offices.
 CREATE TABLE IF NOT EXISTS legal_references (
     reference_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(250) NOT NULL,
@@ -250,7 +351,7 @@ CREATE TABLE IF NOT EXISTS legal_references (
     user_id UUID REFERENCES app_users(user_id)
 );
 
--- 11. Contracts, invoices, and payments
+-- 12. Contracts, invoices, and payments
 CREATE TABLE IF NOT EXISTS contracts (
     contract_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(200) NOT NULL,
@@ -262,12 +363,15 @@ CREATE TABLE IF NOT EXISTS contracts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     client_id UUID NOT NULL REFERENCES clients(client_id),
     case_id UUID REFERENCES legal_cases(case_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
     invoice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoice_number VARCHAR(50) NOT NULL UNIQUE,
+    invoice_number VARCHAR(50) NOT NULL,
     amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
     currency CHAR(3) NOT NULL DEFAULT 'ILS',
     status VARCHAR(30) NOT NULL DEFAULT 'unpaid'
@@ -276,7 +380,12 @@ CREATE TABLE IF NOT EXISTS invoices (
     due_at TIMESTAMPTZ,
     client_id UUID NOT NULL REFERENCES clients(client_id),
     case_id UUID REFERENCES legal_cases(case_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT invoices_office_invoice_key UNIQUE (office_id, invoice_id),
+    CONSTRAINT invoices_office_number_key UNIQUE (office_id, invoice_number),
+    FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -288,10 +397,12 @@ CREATE TABLE IF NOT EXISTS payments (
     status VARCHAR(30) NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
     invoice_id UUID NOT NULL REFERENCES invoices(invoice_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, invoice_id) REFERENCES invoices(office_id, invoice_id)
 );
 
--- 12. Case notes
+-- 13. Case notes
 CREATE TABLE IF NOT EXISTS case_notes (
     note_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     body TEXT NOT NULL,
@@ -300,10 +411,12 @@ CREATE TABLE IF NOT EXISTS case_notes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ,
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
--- 13. AI interactions and their legal sources
+-- 14. AI interactions and their legal sources
 CREATE TABLE IF NOT EXISTS ai_interactions (
     interaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     question TEXT NOT NULL,
@@ -312,7 +425,10 @@ CREATE TABLE IF NOT EXISTS ai_interactions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID REFERENCES legal_cases(case_id),
-    document_id UUID REFERENCES documents(document_id)
+    document_id UUID REFERENCES documents(document_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    FOREIGN KEY (office_id, document_id) REFERENCES documents(office_id, document_id)
 );
 
 CREATE TABLE IF NOT EXISTS ai_interaction_sources (
@@ -323,7 +439,7 @@ CREATE TABLE IF NOT EXISTS ai_interaction_sources (
     PRIMARY KEY (interaction_id, reference_id)
 );
 
--- 14. Case status history
+-- 15. Case status history
 CREATE TABLE IF NOT EXISTS case_status_history (
     history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     old_status VARCHAR(30)
@@ -333,17 +449,25 @@ CREATE TABLE IF NOT EXISTS case_status_history (
     change_note TEXT,
     changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
-    user_id UUID NOT NULL REFERENCES app_users(user_id)
+    user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
--- 15. Query and foreign-key indexes
+-- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_verifications_identifier ON verifications(identifier);
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON app_users(role_id);
+CREATE INDEX IF NOT EXISTS idx_law_offices_status ON law_offices(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_office_memberships_user ON office_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_office_invitations_office ON office_invitations(office_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_office_invitations_email ON office_invitations(lower(email));
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
+CREATE INDEX IF NOT EXISTS idx_clients_office ON clients(office_id);
+CREATE INDEX IF NOT EXISTS idx_cases_office ON legal_cases(office_id, opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cases_court ON legal_cases(court_id);
 CREATE INDEX IF NOT EXISTS idx_cases_status ON legal_cases(status);
 CREATE INDEX IF NOT EXISTS idx_involves_case ON involves(case_id);

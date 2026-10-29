@@ -1,4 +1,5 @@
 import { auth } from '../config/auth.js';
+import { listMemberships } from '../services/officeService.js';
 
 function selectFields(value, fields) {
   return Object.fromEntries(fields.map((field) => [field, value?.[field]]));
@@ -11,10 +12,27 @@ function toPublicApplicationUser(user) {
     'email',
     'email_verified',
     'status',
+    'is_platform_admin',
     'created_at',
     'updated_at',
-    'role',
   ]);
+}
+
+/**
+ * The frontend decides where to send the user from this single payload: the active office
+ * (verified server-side) or, without one, the list of memberships to choose from.
+ */
+async function sessionContext(request) {
+  const memberships = await listMemberships(request.user);
+  const activeOffice = memberships.find(
+    (membership) => membership.office_id === request.user.office_id
+  ) ?? null;
+  return {
+    user: toPublicApplicationUser(request.user),
+    role: request.user.role ?? null,
+    active_office: activeOffice,
+    memberships,
+  };
 }
 
 function appendSetCookies(response, authResponse) {
@@ -48,28 +66,30 @@ export function toPublicSession(authSession) {
   };
 }
 
-export function getMe(request, response) {
-  const user = toPublicApplicationUser(request.user);
-
-  response.status(200).json({
-    user,
-    role: user.role,
-    session: toPublicSession(request.session),
-  });
+export async function getMe(request, response, next) {
+  try {
+    response.status(200).json({
+      ...(await sessionContext(request)),
+      session: toPublicSession(request.session),
+    });
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function getCurrentSession(request, response) {
-  const user = toPublicApplicationUser(request.user);
-
-  response.status(200).json({
-    user,
-    role: user.role,
-    session: toPublicSession(request.session),
-    expiresAt: request.session?.session?.expiresAt ?? null,
-    expired: request.session
-      ? new Date(request.session.session.expiresAt).getTime() <= Date.now()
-      : false,
-  });
+export async function getCurrentSession(request, response, next) {
+  try {
+    response.status(200).json({
+      ...(await sessionContext(request)),
+      session: toPublicSession(request.session),
+      expiresAt: request.session?.session?.expiresAt ?? null,
+      expired: request.session
+        ? new Date(request.session.session.expiresAt).getTime() <= Date.now()
+        : false,
+    });
+  } catch (error) {
+    next(error);
+  }
 }
 
 export async function refreshSession(request, response, next) {

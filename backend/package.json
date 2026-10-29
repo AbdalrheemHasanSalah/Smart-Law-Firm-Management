@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --import ./test/setup.js --test test/session.test.js test/client.test.js test/case.test.js test/documents.test.js test/contracts.test.js test/caseNotes.test.js test/initializeConfig.test.js test/task.test.js test/securityConfig.test.js test/dbConfig.test.js test/originProtection.test.js test/user.test.js test/securityHeaders.test.js test/rateLimit.test.js test/errorHandler.test.js test/migrationRunner.test.js && npm run test:unit-isolation",
+    "test": "node --import ./test/setup.js --test test/session.test.js test/client.test.js test/case.test.js test/documents.test.js test/contracts.test.js test/caseNotes.test.js test/initializeConfig.test.js test/task.test.js test/securityConfig.test.js test/dbConfig.test.js test/originProtection.test.js test/user.test.js test/offices.test.js test/securityHeaders.test.js test/rateLimit.test.js test/errorHandler.test.js test/migrationRunner.test.js && npm run test:unit-isolation",
     "test:unit-isolation": "node --import ./test/unitTestIsolationSetup.js --test test/unitTestIsolation.test.js",
     "test:case-assignment-unit": "node --import ./test/caseAssignmentUnitSetup.js --test test/caseAssignment.service.test.js",
     "test:client-account-linking": "node --import ./test/setup.js --test test/clientAccountLinking.test.js",
@@ -18,7 +18,8 @@
     "test:provision-admin": "node scripts/provisionTestAdmin.js",
     "db:init": "node database/initialize.js",
     "db:migrate": "node database/migrate.js --up",
-    "db:migrate:status": "node database/migrate.js --status"
+    "db:migrate:status": "node database/migrate.js --status",
+    "platform-admin:grant": "node scripts/grantPlatformAdmin.js"
   },
   "dependencies": {
     "better-auth": "^1.7.7",

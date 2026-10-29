@@ -1,7 +1,8 @@
 import { pool, query } from '../config/db.js';
+import { hasOfficeContext } from './officeScope.js';
 
 const USER_ROLES = new Set(['admin', 'lawyer', 'assistant', 'client']);
-const USER_STATUSES = new Set(['active', 'inactive', 'suspended']);
+const USER_STATUSES = new Set(['active', 'suspended']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -23,6 +24,7 @@ function assertAdministrator(actor) {
     actor?.role !== 'admin'
     || typeof actor.user_id !== 'string'
     || !UUID_PATTERN.test(actor.user_id)
+    || !hasOfficeContext(actor)
   ) {
     throw new UserServiceError(403, 'You do not have permission to access this resource.');
   }
@@ -112,6 +114,7 @@ function publicUser(row) {
     email: row.email,
     email_verified: row.email_verified,
     status: row.status,
+    account_status: row.account_status,
     created_at: row.created_at,
     updated_at: row.updated_at,
     role: row.role,
@@ -132,9 +135,9 @@ function publicUser(row) {
   return user;
 }
 
-function buildFilters({ search, role, status }) {
+function buildFilters({ search, role, status }, initialParameters = []) {
   const conditions = [];
-  const parameters = [];
+  const parameters = [...initialParameters];
 
   if (search) {
     parameters.push(`%${search.replace(/[\\%_]/g, '\\$&')}%`);
@@ -147,7 +150,7 @@ function buildFilters({ search, role, status }) {
   }
   if (status) {
     parameters.push(status);
-    conditions.push(`u.status = $${parameters.length}`);
+    conditions.push(`membership.status = $${parameters.length}`);
   }
 
   return {
@@ -163,17 +166,19 @@ function userSelectSql(whereClause) {
       u.full_name,
       u.email,
       u.email_verified,
-      u.status,
-      u.created_at,
-      u.updated_at,
+      membership.status,
+      u.status AS account_status,
+      membership.created_at,
+      membership.updated_at,
       r.role_name AS role,
       lp.lawyer_profile_id,
       lp.bar_number,
       lp.specialty,
       lp.years_experience,
       lp.license_status
-    FROM app_users u
-    JOIN roles r ON r.role_id = u.role_id
+    FROM office_memberships membership
+    JOIN app_users u ON u.user_id = membership.user_id
+    JOIN roles r ON r.role_id = membership.role_id
     LEFT JOIN lawyer_profiles lp ON lp.user_id = u.user_id
     ${whereClause}
   `;
@@ -182,22 +187,23 @@ function userSelectSql(whereClause) {
 export async function listUsers(actor, queryParameters = {}) {
   assertAdministrator(actor);
   const options = parseListOptions(queryParameters);
-  const { parameters, clause } = buildFilters(options);
+  const { parameters, clause } = buildFilters(options, [actor.office_id]);
 
   const countResult = await query(
     `
       SELECT COUNT(*)::int AS total
-      FROM app_users u
-      JOIN roles r ON r.role_id = u.role_id
-      WHERE TRUE
+      FROM office_memberships membership
+      JOIN app_users u ON u.user_id = membership.user_id
+      JOIN roles r ON r.role_id = membership.role_id
+      WHERE membership.office_id = $1
       ${clause}
     `,
     parameters
   );
   const pageParameters = [...parameters, options.pageSize, options.offset];
   const listResult = await query(
-    `${userSelectSql(`WHERE TRUE ${clause}`)}
-      ORDER BY u.created_at DESC, u.user_id ASC
+    `${userSelectSql(`WHERE membership.office_id = $1 ${clause}`)}
+      ORDER BY membership.created_at DESC, u.user_id ASC
       LIMIT $${pageParameters.length - 1}
       OFFSET $${pageParameters.length}
     `,
@@ -220,8 +226,8 @@ export async function getUserById(actor, userId) {
   assertAdministrator(actor);
   validateUserId(userId);
   const result = await query(
-    `${userSelectSql('WHERE u.user_id = $1')} LIMIT 1`,
-    [userId]
+    `${userSelectSql('WHERE u.user_id = $1 AND membership.office_id = $2')} LIMIT 1`,
+    [userId, actor.office_id]
   );
 
   if (!result.rowCount) {
@@ -243,20 +249,21 @@ export async function updateUserRole(actor, userId, body) {
 
   const result = await query(
     `
-      UPDATE app_users AS u
+      UPDATE office_memberships AS membership
       SET role_id = r.role_id, updated_at = NOW()
       FROM roles AS r
-      WHERE u.user_id = $1
+      WHERE membership.user_id = $1
+        AND membership.office_id = $3
         AND r.role_name = $2
-      RETURNING u.user_id
+      RETURNING membership.user_id
     `,
-    [userId, role]
+    [userId, role, actor.office_id]
   );
 
   if (!result.rowCount) {
     const exists = await query(
-      'SELECT 1 FROM app_users WHERE user_id = $1',
-      [userId]
+      'SELECT 1 FROM office_memberships WHERE user_id = $1 AND office_id = $2',
+      [userId, actor.office_id]
     );
     if (!exists.rowCount) {
       throw new UserServiceError(404, 'User not found.');
@@ -272,7 +279,7 @@ export async function updateUserStatus(actor, userId, body) {
   validateUserId(userId);
   const status = validateBody(body, new Set(['status']));
   if (typeof status !== 'string' || !USER_STATUSES.has(status)) {
-    invalid('status must be active, inactive, or suspended.');
+    invalid('status must be active or suspended.');
   }
   if (
     actor.user_id?.toLowerCase() === userId.toLowerCase()
@@ -290,8 +297,12 @@ export async function updateUserStatus(actor, userId, body) {
     transactionStarted = true;
 
     const accountResult = await client.query(
-      'SELECT status, auth_user_id FROM app_users WHERE user_id = $1 FOR UPDATE',
-      [userId]
+      `SELECT membership.status, u.auth_user_id
+         FROM office_memberships membership
+         JOIN app_users u ON u.user_id = membership.user_id
+        WHERE membership.user_id = $1 AND membership.office_id = $2
+        FOR UPDATE OF membership`,
+      [userId, actor.office_id]
     );
     if (!accountResult.rowCount) {
       throw new UserServiceError(404, 'User not found.');
@@ -299,24 +310,22 @@ export async function updateUserStatus(actor, userId, body) {
 
     const result = await client.query(
       `
-        UPDATE app_users
+        UPDATE office_memberships
         SET status = $2, updated_at = NOW()
-        WHERE user_id = $1
+        WHERE user_id = $1 AND office_id = $3
         RETURNING user_id
       `,
-      [userId, status]
+      [userId, status, actor.office_id]
     );
     if (!result.rowCount) {
       throw new UserServiceError(404, 'User not found.');
     }
 
-    if (
-      (status !== 'active' || accountResult.rows[0].status !== 'active')
-      && accountResult.rows[0].auth_user_id
-    ) {
+    // A suspended member loses this office from every open session immediately.
+    if (status !== 'active' && accountResult.rows[0].auth_user_id) {
       await client.query(
-        'DELETE FROM sessions WHERE user_id = $1',
-        [accountResult.rows[0].auth_user_id]
+        'UPDATE sessions SET active_office_id = NULL WHERE user_id = $1 AND active_office_id = $2',
+        [accountResult.rows[0].auth_user_id, actor.office_id]
       );
     }
 

@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TASK_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
@@ -187,10 +188,12 @@ function validateBody(body, allowedFields, { create = false } = {}) {
 }
 
 function taskAccessScope(actor, parameters, alias = 't') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
   return `
+    ${office}
     AND ${alias}.assigned_to_user_id = ${userParameter}
     AND (
       ${alias}.case_id IS NULL
@@ -324,6 +327,7 @@ export async function createTask(actor, body) {
     fields.case_id ?? null,
     actor.user_id,
   ];
+  officeCondition(actor, parameters, 'lc');
   const result = await execute(
     `
       INSERT INTO tasks (
@@ -335,22 +339,28 @@ export async function createTask(actor, body) {
         completed_at,
         case_id,
         assigned_to_user_id,
-        created_by_user_id
+        created_by_user_id,
+        office_id
       )
       SELECT
-        $4,
         $5,
         $6,
         $7,
         $8,
         $9,
+        $10,
         lc.case_id,
         assignee.user_id,
-        creator.user_id
+        creator.user_id,
+        membership.office_id
       FROM app_users assignee
-      JOIN roles assignee_role ON assignee_role.role_id = assignee.role_id
+      JOIN office_memberships membership
+        ON membership.user_id = assignee.user_id
+        AND membership.office_id = $4
+        AND membership.status = 'active'
+      JOIN roles assignee_role ON assignee_role.role_id = membership.role_id
       JOIN app_users creator ON creator.user_id = $3
-      LEFT JOIN legal_cases lc ON lc.case_id = $2
+      LEFT JOIN legal_cases lc ON lc.case_id = $2 AND lc.office_id = membership.office_id
       WHERE assignee.user_id = $1
         AND assignee.status = 'active'
         AND assignee_role.role_name IN ('lawyer', 'assistant')

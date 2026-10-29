@@ -9,6 +9,7 @@ const { default: app } = await import('../src/app.js');
 
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const taskId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const caseId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
 const assigneeId = 'd5a39bb4-f7b6-43a0-bfca-2b16678cc514';
@@ -24,6 +25,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const taskRecord = {
@@ -118,8 +120,8 @@ test('admin lists tasks with status filters and bounded pagination', async (t) =
   assert.equal(body.pagination.pageSize, 50);
   assert.equal(body.tasks[0].task_id, taskId);
   assert.equal('created_by_user_id' in body.tasks[0], false);
-  assert.deepEqual(calls[1].parameters, ['pending']);
-  assert.deepEqual(calls[2].parameters, ['pending', 50, 50]);
+  assert.deepEqual(calls[1].parameters, [officeId, 'pending']);
+  assert.deepEqual(calls[2].parameters, [officeId, 'pending', 50, 50]);
   assert.equal(calls.length, 3);
 });
 
@@ -170,10 +172,12 @@ test('only admins can create tasks, and admin creation validates eligible assign
       assert.match(sql, /assignee_role\.role_name IN \('lawyer', 'assistant'\)/);
       assert.match(sql, /assignee\.status = 'active'/);
       assert.match(sql, /FROM assigned_to assignment/);
+      assert.match(sql, /membership\.office_id = \$4/);
       assert.deepEqual(parameters, [
         assigneeId,
         caseId,
         appUserId,
+        officeId,
         'File motion',
         'Prepare the motion.',
         'pending',

@@ -24,6 +24,8 @@ app.use(cors({
 app.use('/api/auth', createRateLimit());
 app.use('/api/auth/sign-in/email', createRateLimit({ maxRequests: 10 }));
 app.use('/api/auth/sign-up/email', createRateLimit({ maxRequests: 10 }));
+app.use('/api/auth/request-password-reset', createRateLimit({ maxRequests: 5 }));
+app.use('/api/auth/reset-password', createRateLimit({ maxRequests: 10 }));
 app.use(createOriginProtection({
   enforce: securityConfig.enforceOriginProtection,
   trustedOrigins: securityConfig.trustedOrigins,

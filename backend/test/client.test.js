@@ -11,6 +11,7 @@ const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
 const linkedUserId = '8bf121a3-7cf3-4c44-8a56-65a05dd1c9b1';
 const clientId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const session = {
   user: { id: authUserId },
   session: { id: 'session-id', expiresAt: '2999-01-01T00:00:00.000Z' },
@@ -23,6 +24,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const clientRecord = {
@@ -104,7 +106,7 @@ function setupLinkRequest(t, role = 'admin', transactionHandler) {
         return { rowCount: null, rows: [] };
       }
       if (sql.includes('FROM clients WHERE client_id')) {
-        return { rowCount: 1, rows: [{ client_id: clientId, user_id: null }] };
+        return { rowCount: 1, rows: [{ client_id: clientId, user_id: null, office_id: officeId }] };
       }
       if (sql.includes('FROM app_users u')) {
         return { rowCount: 1, rows: [{ user_id: linkedUserId }] };
@@ -184,6 +186,7 @@ test('admin creates a client with only permitted values and a safe public respon
       '+1 555 0100',
       'contact@example.com',
       null,
+      officeId,
     ]);
     return { rowCount: 1, rows: [{ ...clientRecord, client_type: 'organization' }] };
   });
@@ -276,9 +279,11 @@ test('client list applies a maximum page size and parameterizes literal search t
   });
   assert.equal(body.clients.length, 1);
   assert.equal(calls.length, 3);
-  assert.match(calls[1].sql, /ILIKE \$1 ESCAPE E'\\\\'/);
+  assert.match(calls[1].sql, /c\.office_id = \$1/);
+  assert.match(calls[1].sql, /ILIKE \$2 ESCAPE E'\\\\'/);
   assert.equal(calls[1].sql.includes("'%_"), false);
-  assert.equal(calls[1].parameters[0], "%\\%\\_'%");
+  assert.equal(calls[1].parameters[0], officeId);
+  assert.equal(calls[1].parameters[1], "%\\%\\_'%");
   assert.equal(calls[2].parameters.at(-2), 50);
   assert.equal(calls[2].parameters.at(-1), 100);
   assert.match(calls[2].sql, /ORDER BY c\.created_at DESC, c\.client_id ASC/);
@@ -328,10 +333,10 @@ test('admins can list a client case history with pagination and search', async (
     assert.match(sql, /FROM involves i\s+JOIN clients c ON c\.client_id = i\.client_id/);
     assert.match(sql, /JOIN legal_cases lc ON lc\.case_id = i\.case_id/);
     if (sql.includes('COUNT(*)')) {
-      assert.deepEqual(parameters, [clientId, '%dispute%',]);
+      assert.deepEqual(parameters, [clientId, officeId, '%dispute%']);
       return { rowCount: 1, rows: [{ total: 1 }] };
     }
-    assert.deepEqual(parameters, [clientId, '%dispute%', 20, 0]);
+    assert.deepEqual(parameters, [clientId, officeId, '%dispute%', 20, 0]);
     return { rowCount: 1, rows: [caseRecord] };
   });
 
@@ -362,7 +367,8 @@ test('an administrator receives 404 for a missing client rather than an empty hi
 test('client case history remains bound to the authenticated client identity', async (t) => {
   const calls = setupRequest(t, 'client', async (sql, parameters) => {
     if (sql.includes('FROM involves')) {
-      assert.match(sql, /c\.user_id = \$2/);
+      assert.match(sql, /c\.office_id = \$2/);
+      assert.match(sql, /c\.user_id = \$3/);
       assert.ok(parameters.includes(appUserId));
     }
     if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ total: 0 }] };
@@ -404,7 +410,7 @@ test('lawyers and assistants receive only cases assigned to them for a client', 
     await t.test(role, async (subtest) => {
       const calls = setupRequest(subtest, role, async (sql, parameters) => {
         if (sql.includes('FROM involves')) {
-          assert.match(sql, /assignment\.user_id = \$2/);
+          assert.match(sql, /assignment\.user_id = \$3/);
           assert.ok(parameters.includes(appUserId));
         }
         if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ total: 1 }] };
@@ -586,12 +592,14 @@ test('admin links an eligible application account and atomically records the aud
     ['BEGIN', 'SELECT client_id,', 'SELECT u.user_id', 'SELECT client_id', 'UPDATE clients', 'INSERT INTO', 'COMMIT']
   );
   assert.deepEqual(state.transactionCalls[0].parameters, []);
-  assert.deepEqual(state.transactionCalls[1].parameters, [clientId]);
+  assert.match(state.transactionCalls[1].sql, /clients\.office_id = \$2/);
+  assert.deepEqual(state.transactionCalls[1].parameters, [clientId, officeId]);
   assert.match(state.transactionCalls[2].sql, /r\.role_name = 'client'/);
   assert.match(state.transactionCalls[2].sql, /u\.status = 'active'/);
   assert.match(state.transactionCalls[2].sql, /u\.auth_user_id IS NOT NULL/);
-  assert.deepEqual(state.transactionCalls[2].parameters, [linkedUserId]);
-  assert.deepEqual(state.transactionCalls[3].parameters, [linkedUserId, clientId]);
+  assert.match(state.transactionCalls[2].sql, /membership\.office_id = \$2/);
+  assert.deepEqual(state.transactionCalls[2].parameters, [linkedUserId, officeId]);
+  assert.deepEqual(state.transactionCalls[3].parameters, [linkedUserId, clientId, officeId]);
   assert.deepEqual(state.transactionCalls[4].parameters, [clientId, linkedUserId]);
   assert.deepEqual(state.transactionCalls[5].parameters, [
     'client_account_linked',
@@ -599,6 +607,7 @@ test('admin links an eligible application account and atomically records the aud
     clientId,
     JSON.stringify({ linked_user_id: linkedUserId }),
     appUserId,
+    officeId,
   ]);
   assert.deepEqual(state.transactionCalls[6].parameters, []);
   assert.equal(state.releaseState.count, 1);
@@ -727,7 +736,7 @@ test('the expected client-user unique violation maps to conflict', async (t) => 
     if (sql.includes('UPDATE clients')) {
       throw Object.assign(new Error('duplicate link'), {
         code: '23505',
-        constraint: 'clients_user_id_key',
+        constraint: 'clients_office_user_key',
       });
     }
     return undefined;

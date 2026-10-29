@@ -10,6 +10,7 @@ const { default: app } = await import('../src/app.js');
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const session = {
   user: { id: authUserId },
   session: { id: 'session-id', expiresAt: '2999-01-01T00:00:00.000Z' },
@@ -22,6 +23,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const caseRecord = {
@@ -160,6 +162,7 @@ test('admins can create cases with schema-supported fields', async (t) => {
       null,
       null,
       null,
+      officeId,
     ]);
     return { rowCount: 1, rows: [{ ...caseRecord, case_number: 'CASE-002', title: 'New matter' }] };
   });
@@ -298,8 +301,10 @@ test('case search is parameterized, escaped, and pagination is capped', async (t
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.pagination.pageSize, 50);
-  assert.match(calls[1].sql, /case_number ILIKE \$1 ESCAPE E'\\\\'/);
-  assert.equal(calls[1].parameters[0], "%\\%\\_'%");
+  assert.match(calls[1].sql, /lc\.office_id = \$1/);
+  assert.match(calls[1].sql, /case_number ILIKE \$2 ESCAPE E'\\\\'/);
+  assert.equal(calls[1].parameters[0], officeId);
+  assert.equal(calls[1].parameters[1], "%\\%\\_'%");
   assert.equal(calls[2].parameters.at(-2), 50);
   assert.equal(calls[2].parameters.at(-1), 50);
   assert.match(calls[2].sql, /ORDER BY lc\.opened_at DESC, lc\.case_id ASC/);
@@ -346,7 +351,7 @@ test('case updates validate dates and do not allow null opened_at', async (t) =>
 test('admin updates an existing case using only allowlisted fields', async (t) => {
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /UPDATE legal_cases AS lc/);
-    assert.deepEqual(parameters, ['closed', caseId]);
+    assert.deepEqual(parameters, ['closed', caseId, officeId]);
     return { rowCount: 1, rows: [{ ...caseRecord, status: 'closed' }] };
   });
   const response = await request('PATCH', `/api/cases/${caseId}`, { status: 'closed' });
@@ -397,9 +402,10 @@ test('case queries use EXISTS so multiple client or assignment relationships do 
 test('admins can link an existing client to a case', async (t) => {
   const clientId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
-    assert.match(sql, /INSERT INTO involves \(client_id, case_id\)/);
-    assert.match(sql, /FROM clients c\s+JOIN legal_cases lc/);
-    assert.deepEqual(parameters, [clientId, caseId]);
+    assert.match(sql, /INSERT INTO involves \(client_id, case_id, office_id\)/);
+    assert.match(sql, /FROM clients c\s+JOIN legal_cases lc ON lc\.case_id = \$2 AND lc\.office_id = c\.office_id/);
+    assert.match(sql, /c\.office_id = \$3/);
+    assert.deepEqual(parameters, [clientId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -486,14 +492,15 @@ test('lawyer assignments require an active lawyer role and active lawyer profile
   const lawyerId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /LEFT JOIN lawyer_profiles lp ON lp\.user_id = u\.user_id/);
-    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
     assert.match(sql, /r\.role_name = 'assistant'/);
     assert.match(sql, /r\.role_name = 'lawyer'/);
     assert.match(sql, /OR\s*\(\s*r\.role_name = 'lawyer'\s+AND lp\.license_status = 'active'/);
     assert.match(sql, /u\.status = 'active'/);
     assert.match(sql, /lp\.license_status = 'active'/);
-    assert.deepEqual(parameters, [lawyerId, caseId]);
+    assert.match(sql, /membership\.office_id = lc\.office_id/);
+    assert.deepEqual(parameters, [lawyerId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -523,11 +530,11 @@ test('assistant assignments require an active assistant account but no lawyer pr
   const assistantId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /LEFT JOIN lawyer_profiles lp ON lp\.user_id = u\.user_id/);
-    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
     assert.match(sql, /r\.role_name = 'assistant'/);
     assert.match(sql, /u\.status = 'active'/);
-    assert.deepEqual(parameters, [assistantId, caseId]);
+    assert.deepEqual(parameters, [assistantId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -563,12 +570,12 @@ test('assistant eligibility does not extend to inactive users, clients, or unsup
   ]) {
     await t.test(`${ineligibleAccount.role} (${ineligibleAccount.status}) is rejected`, async (subtest) => {
       const calls = setupRequest(subtest, 'admin', async (sql, parameters) => {
-        assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-        assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+        assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+        assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
         assert.match(sql, /r\.role_name = 'assistant'/);
         assert.match(sql, /OR\s*\(\s*r\.role_name = 'lawyer'\s+AND lp\.license_status = 'active'/);
         assert.match(sql, /u\.status = 'active'/);
-        assert.deepEqual(parameters, [ineligibleAccount.user_id, caseId]);
+        assert.deepEqual(parameters, [ineligibleAccount.user_id, caseId, officeId]);
         return { rowCount: 0, rows: [] };
       });
       const response = await request('POST', `/api/cases/${caseId}/assignments`, {
@@ -619,7 +626,7 @@ test('relationship details honor case access and only expose a client own profil
     assert.match(sql, /FROM assigned_to assignment/);
     assert.match(sql, /FROM involves i/);
     assert.match(sql, /json_agg/);
-    assert.match(sql, /AND c\.user_id = \$2/);
+    assert.match(sql, /AND c\.user_id = \$3/);
     assert.ok(parameters.includes(appUserId));
     assert.doesNotMatch(sql, /c\.email|c\.phone|c\.address/);
     return {

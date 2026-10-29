@@ -98,21 +98,33 @@ test('role middleware permits allowed roles and rejects other roles', () => {
     },
   };
 
+  const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
   requireRole(['admin', 'lawyer'])(
-    { user: { role: 'lawyer' } },
+    { user: { role: 'lawyer', office_id: officeId } },
     response,
     () => { nextCalls += 1; }
   );
   assert.equal(nextCalls, 1);
 
   requireRole(['admin', 'lawyer'])(
-    { user: { role: 'client' } },
+    { user: { role: 'client', office_id: officeId } },
     response,
     () => { nextCalls += 1; }
   );
   assert.equal(nextCalls, 1);
   assert.equal(responseStatus, 403);
+  assert.equal(responseBody.code, 'FORBIDDEN');
   assert.equal(responseBody.error, 'You do not have permission to access this resource.');
+
+  // Without a verified active office no role is honoured, whatever the role field says.
+  requireRole(['admin', 'lawyer'])(
+    { user: { role: 'admin', office_id: null } },
+    response,
+    () => { nextCalls += 1; }
+  );
+  assert.equal(nextCalls, 1);
+  assert.equal(responseStatus, 403);
+  assert.equal(responseBody.code, 'NO_ACTIVE_OFFICE');
 });
 
 test('health endpoint remains available', async () => {
@@ -191,7 +203,7 @@ const activeSession = {
 };
 
 const activeUser = {
-  user_id: 'app-user-id',
+  user_id: '5d2c9e1a-7b3f-4c8d-9e0f-1a2b3c4d5e6f',
   auth_user_id: 'auth-user-id',
   full_name: 'Test User',
   email: 'test@example.com',
@@ -200,11 +212,26 @@ const activeUser = {
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'client',
+};
+
+const activeMembership = {
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
+  office_name: 'Test Office',
+  office_status: 'active',
+  office_city: 'Nablus',
+  role: 'client',
+  membership_status: 'active',
+  is_owner: false,
 };
 
 function mockUserLookup(t, user = activeUser) {
   return t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('FROM office_memberships membership')) {
+      assert.deepEqual(params, [user.user_id]);
+      return { rowCount: 1, rows: [activeMembership] };
+    }
     assert.match(sql, /JOIN sessions s/);
     assert.equal(sql.includes('password_hash'), false);
     assert.deepEqual(params, ['auth-user-id', 'session-id']);
@@ -224,6 +251,8 @@ test('Better Auth session authenticates the current-user endpoint without exposi
   const body = await response.json();
   assert.equal(body.user.email, 'test@example.com');
   assert.equal(body.role, 'client');
+  assert.equal(body.active_office.office_id, activeMembership.office_id);
+  assert.deepEqual(body.memberships, [activeMembership]);
   assert.equal(Object.hasOwn(body.user, 'password_hash'), false);
   assert.equal(JSON.stringify(body).includes('must-not-be-exposed'), false);
 });

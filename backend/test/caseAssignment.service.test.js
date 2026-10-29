@@ -5,22 +5,29 @@ import { pool } from '../src/config/db.js';
 import { CaseServiceError, assignStaffToCase } from '../src/services/caseService.js';
 
 // These mocked service tests do not prove PostgreSQL executes the SQL as expected.
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const admin = {
   user_id: '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a',
   role: 'admin',
+  office_id: officeId,
 };
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const lawyerId = '8bf121a3-7cf3-4c44-8a56-65a05dd1c9b1';
 const assistantId = '9bf121a3-7cf3-4c44-8a56-65a05dd1c9b2';
 
 const assignmentSql = `
-  INSERT INTO assigned_to (user_id, case_id, assignment_role)
-  SELECT u.user_id, lc.case_id, r.role_name
+  INSERT INTO assigned_to (user_id, case_id, assignment_role, office_id)
+  SELECT u.user_id, lc.case_id, r.role_name, lc.office_id
   FROM app_users u
-  JOIN roles r ON r.role_id = u.role_id
   JOIN legal_cases lc ON lc.case_id = $2
+  JOIN office_memberships membership
+    ON membership.user_id = u.user_id
+    AND membership.office_id = lc.office_id
+    AND membership.status = 'active'
+  JOIN roles r ON r.role_id = membership.role_id
   LEFT JOIN lawyer_profiles lp ON lp.user_id = u.user_id
   WHERE u.user_id = $1
+    AND lc.office_id = $3
     AND u.status = 'active'
     AND (
       r.role_name = 'assistant'
@@ -58,7 +65,7 @@ function assignment(userId, assignmentRole) {
 function assertAssignmentQuery(calls, userId) {
   assert.equal(calls.length, 1);
   assert.equal(normalizeSql(calls[0].sql), normalizeSql(assignmentSql));
-  assert.deepEqual(calls[0].parameters, [userId, caseId]);
+  assert.deepEqual(calls[0].parameters, [userId, caseId, officeId]);
 }
 
 test('assigns an eligible lawyer with the database-derived lawyer assignment role', async (t) => {

@@ -20,6 +20,7 @@ const { uploadDocument } = await import('../src/services/documentService.js');
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const documentId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
 const clientId = 'd5a39bb4-f7b6-43a0-bfca-2b16678cc514';
 const session = {
@@ -34,6 +35,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 
@@ -104,7 +106,8 @@ test('admin can upload a PDF to an existing case without exposing storage or upl
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     if (sql.includes('FROM legal_cases lc')) {
       assert.match(sql, /EXISTS\s*\(/);
-      assert.deepEqual(parameters, [caseId, null]);
+      assert.match(sql, /lc\.office_id = \$2/);
+      assert.deepEqual(parameters, [caseId, officeId, null]);
       return { rowCount: 1, rows: [{ case_id: caseId }] };
     }
     assert.match(sql, /INSERT INTO documents/);
@@ -488,7 +491,8 @@ test('client document access is limited to explicitly linked authorized document
   const calls = setupRequest(t, 'client', async (sql, parameters) => {
     assert.match(sql, /access_level = 'authorized_users'/);
     assert.match(sql, /JOIN involves i ON i\.client_id = c\.client_id/);
-    assert.match(sql, /c\.user_id = \$2/);
+    assert.match(sql, /d\.office_id = \$2/);
+    assert.match(sql, /c\.user_id = \$3/);
     assert.ok(parameters.includes(appUserId));
     return { rowCount: 0, rows: [] };
   });
@@ -502,9 +506,10 @@ test('lawyers and assistants cannot read restricted documents without current ca
     await t.test(role, async (subtest) => {
       const calls = setupRequest(subtest, role, async (sql, parameters) => {
         assert.match(sql, /d\.access_level = 'case_team'/);
-        assert.match(sql, /d\.user_id = \$2/);
+        assert.match(sql, /d\.office_id = \$2/);
+        assert.match(sql, /d\.user_id = \$3/);
         assert.match(sql, /FROM assigned_to assignment/);
-        assert.match(sql, /assignment\.user_id = \$2/);
+        assert.match(sql, /assignment\.user_id = \$3/);
         assert.ok(parameters.includes(appUserId));
         return { rowCount: 0, rows: [] };
       });
@@ -519,7 +524,7 @@ test('lawyers and assistants cannot read restricted documents without current ca
 
 test('an uploader who loses case assignment cannot keep accessing restricted documents', async (t) => {
   const calls = setupRequest(t, 'lawyer', async (sql, parameters) => {
-    assert.match(sql, /d\.user_id = \$2/);
+    assert.match(sql, /d\.user_id = \$3/);
     assert.match(sql, /FROM assigned_to assignment/);
     assert.ok(parameters.includes(appUserId));
     return { rowCount: 0, rows: [] };
@@ -535,7 +540,7 @@ test('a client cannot access an authorized document linked to a different client
   const calls = setupRequest(t, 'client', async (sql, parameters) => {
     assert.match(sql, /d\.access_level = 'authorized_users'/);
     assert.match(sql, /c\.client_id = d\.client_id/);
-    assert.match(sql, /c\.user_id = \$2/);
+    assert.match(sql, /c\.user_id = \$3/);
     assert.match(sql, /i\.case_id = d\.case_id/);
     assert.ok(parameters.includes(appUserId));
     return { rowCount: 0, rows: [] };
@@ -579,8 +584,8 @@ test('document lists enforce scoped search, case filters, stable pagination, and
   assert.equal(body.documents.length, 1);
   assert.equal('storage_key' in body.documents[0], false);
   assert.equal('user_id' in body.documents[0], false);
-  assert.deepEqual(calls[1].parameters, [caseId, "%\\%\\_'%"]);
-  assert.deepEqual(calls[2].parameters, [caseId, "%\\%\\_'%", 50, 50]);
+  assert.deepEqual(calls[1].parameters, [officeId, caseId, "%\\%\\_'%"]);
+  assert.deepEqual(calls[2].parameters, [officeId, caseId, "%\\%\\_'%", 50, 50]);
   assert.match(calls[2].sql, /ORDER BY d\.created_at DESC, d\.document_id ASC/);
 });
 
@@ -611,6 +616,7 @@ test('clients cannot modify document metadata or access levels', async (t) => {
     assert.equal(response.status, 403);
     const responseBody = await response.json();
     assert.deepEqual(responseBody, {
+      code: 'FORBIDDEN',
       error: 'You do not have permission to access this resource.',
     });
   }
@@ -677,9 +683,10 @@ test('staff metadata updates remain scoped to their current case assignment', as
   const calls = setupRequest(t, 'assistant', async (sql, parameters) => {
     assert.match(sql, /UPDATE documents AS d/);
     assert.match(sql, /FROM assigned_to assignment/);
-    assert.match(sql, /assignment\.user_id = \$3/);
+    assert.match(sql, /d\.office_id = \$3/);
+    assert.match(sql, /assignment\.user_id = \$4/);
     assert.match(sql, /d\.access_level = 'case_team'/);
-    assert.match(sql, /d\.user_id = \$3/);
+    assert.match(sql, /d\.user_id = \$4/);
     assert.ok(parameters.includes(appUserId));
     return { rowCount: 0, rows: [] };
   });

@@ -7,6 +7,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { query } from '../config/db.js';
+import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STORAGE_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/i;
@@ -63,17 +64,19 @@ function publicContract(row) {
 }
 
 function accessScope(actor, parameters, alias = 'c') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
 
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
   if (actor.role === 'client') {
-    return `AND ${alias}.client_id IN (
-      SELECT client_id FROM clients WHERE user_id = ${userParameter}
+    return `${office} AND ${alias}.client_id IN (
+      SELECT client_id FROM clients
+      WHERE user_id = ${userParameter} AND office_id = ${alias}.office_id
     )`;
   }
   if (actor.role === 'lawyer' || actor.role === 'assistant') {
-    return `AND ${alias}.case_id IS NOT NULL
+    return `${office} AND ${alias}.case_id IS NOT NULL
       AND EXISTS (
         SELECT 1 FROM assigned_to assignment
         WHERE assignment.case_id = ${alias}.case_id
@@ -461,20 +464,21 @@ export async function uploadContract(actor, clientId, request) {
   }
   const maxBytes = getMaxUploadBytes();
   validateContentHeaders(request, maxBytes);
-  const parameters = actor.role === 'admin'
-    ? [clientId, metadata.caseId]
-    : [clientId, metadata.caseId, actor.user_id];
+  const parameters = [clientId, metadata.caseId];
+  const officeClause = officeCondition(actor, parameters, 'c');
+  if (actor.role !== 'admin') parameters.push(actor.user_id);
   const accessCondition = actor.role === 'admin'
     ? ''
     : `AND EXISTS (
         SELECT 1 FROM assigned_to assignment
-        WHERE assignment.case_id = lc.case_id AND assignment.user_id = $3
+        WHERE assignment.case_id = lc.case_id AND assignment.user_id = $4
       )`;
   const related = await execute(
     `SELECT c.client_id, lc.case_id
        FROM clients c
-       LEFT JOIN legal_cases lc ON lc.case_id = $2
+       LEFT JOIN legal_cases lc ON lc.case_id = $2 AND lc.office_id = c.office_id
       WHERE c.client_id = $1
+        AND ${officeClause}
         AND ($2::uuid IS NULL OR EXISTS (
           SELECT 1 FROM involves i
           WHERE i.client_id = c.client_id AND i.case_id = lc.case_id
@@ -490,11 +494,11 @@ export async function uploadContract(actor, clientId, request) {
   try {
     const result = await execute(
       `INSERT INTO contracts
-        (title, contract_type, status, storage_key, client_id, case_id, user_id)
-       VALUES ($1, $2, 'draft', $3, $4, $5, $6)
+        (title, contract_type, status, storage_key, client_id, case_id, user_id, office_id)
+       VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7)
        RETURNING contract_id, title, contract_type, status, created_at, client_id, case_id`,
       [metadata.title, metadata.contractType, storageKey,
-        clientId, metadata.caseId, actor.user_id]
+        clientId, metadata.caseId, actor.user_id, actor.office_id]
     );
     return publicContract(result.rows[0]);
   } catch (error) {
@@ -529,11 +533,12 @@ export async function updateContract(actor, contractId, body) {
   const entries = Object.entries(fields);
   const parameters = entries.map(([, value]) => value);
   parameters.push(contractId);
+  const contractParameter = `$${parameters.length}`;
   const scope = accessScope(actor, parameters);
   const assignments = entries.map(([field], index) => `${field} = $${index + 1}`);
   const result = await execute(
     `UPDATE contracts AS c SET ${assignments.join(', ')}
-      WHERE c.contract_id = $${parameters.length} ${scope}
+      WHERE c.contract_id = ${contractParameter} ${scope}
       RETURNING c.contract_id, c.title, c.contract_type, c.status, c.created_at,
                 c.client_id, c.case_id`,
     parameters

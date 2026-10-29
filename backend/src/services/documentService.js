@@ -6,6 +6,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { query } from '../config/db.js';
+import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STORAGE_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/i;
@@ -61,13 +62,15 @@ function assertActor(actor, roles) {
 }
 
 function documentAccessScope(actor, parameters, alias = 'd') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
 
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
 
   if (actor.role === 'lawyer' || actor.role === 'assistant') {
     return `
+      ${office}
       AND (
         ${alias}.access_level = 'case_team'
         OR ${alias}.user_id = ${userParameter}
@@ -83,6 +86,7 @@ function documentAccessScope(actor, parameters, alias = 'd') {
 
   if (actor.role === 'client') {
     return `
+      ${office}
       AND ${alias}.access_level = 'authorized_users'
       AND EXISTS (
         SELECT 1
@@ -99,9 +103,11 @@ function documentAccessScope(actor, parameters, alias = 'd') {
 }
 
 function caseAccessScope(actor, parameters, alias = 'lc') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
   parameters.push(actor.user_id);
   return `
+    ${office}
     AND EXISTS (
       SELECT 1
       FROM assigned_to assignment
@@ -656,9 +662,10 @@ export async function uploadDocument(actor, caseId, request) {
           access_level,
           case_id,
           client_id,
-          user_id
+          user_id,
+          office_id
         )
-        VALUES ($1, $2, 'application/pdf', $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, 'application/pdf', $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING
           document_id,
           file_name,
@@ -681,6 +688,7 @@ export async function uploadDocument(actor, caseId, request) {
         caseId,
         metadata.clientId,
         actor.user_id,
+        actor.office_id,
       ]
     );
     return publicDocument(result.rows[0]);

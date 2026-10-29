@@ -9,10 +9,11 @@ import lawRoutes from './lawRoutes.js';
 import sessionRoutes from './sessionRoutes.js';
 import userRoutes from './userRoutes.js';
 import caseNoteRoutes from './caseNoteRoutes.js';
+import officeRoutes from './officeRoutes.js';
 
 const router = Router();
 
-router.use(healthRoutes, sessionRoutes, lawRoutes);
+router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseRoutes);
 router.use('/documents', documentRoutes);

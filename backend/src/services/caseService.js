@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { officeCondition } from './officeScope.js';
 
 const CASE_FIELDS = [
   'case_id',
@@ -205,12 +206,14 @@ function assertRole(actor, roles) {
 }
 
 function accessScope(actor, parameters, alias = 'lc') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
 
   if (actor.role === 'lawyer' || actor.role === 'assistant') {
     return `
+      ${office}
       AND EXISTS (
         SELECT 1
         FROM assigned_to assignment
@@ -221,6 +224,7 @@ function accessScope(actor, parameters, alias = 'lc') {
   }
   if (actor.role === 'client') {
     return `
+      ${office}
       AND EXISTS (
         SELECT 1
         FROM involves i
@@ -365,9 +369,10 @@ export async function createCase(actor, body) {
         opened_at,
         closed_at,
         description,
-        court_id
+        court_id,
+        office_id
       )
-      VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()), $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()), $7, $8, $9, $10)
       RETURNING
         case_id,
         case_number,
@@ -390,6 +395,7 @@ export async function createCase(actor, body) {
       fields.closed_at ?? null,
       fields.description ?? null,
       fields.court_id ?? null,
+      actor.office_id,
     ]
   );
   return publicCase(result.rows[0]);
@@ -435,7 +441,7 @@ export async function getCaseRelationships(actor, caseId) {
   const parameters = [caseId];
   const scope = accessScope(actor, parameters);
   const clientDetailScope = actor.role === 'client'
-    ? 'AND c.user_id = $2'
+    ? `AND c.user_id = $${parameters.length}`
     : '';
   const result = await execute(
     `
@@ -481,7 +487,10 @@ export async function getCaseRelationships(actor, caseId) {
             )
             FROM assigned_to assignment
             JOIN app_users u ON u.user_id = assignment.user_id
-            JOIN roles r ON r.role_id = u.role_id
+            JOIN office_memberships membership
+              ON membership.user_id = assignment.user_id
+              AND membership.office_id = assignment.office_id
+            JOIN roles r ON r.role_id = membership.role_id
             WHERE assignment.case_id = ac.case_id
           ),
           '[]'::json
@@ -520,16 +529,19 @@ export async function linkClientToCase(actor, caseId, body) {
     invalid('client_id must be a valid UUID.');
   }
 
+  const parameters = [body.client_id, caseId];
+  const officeClause = officeCondition(actor, parameters, 'c');
   const result = await execute(
     `
-      INSERT INTO involves (client_id, case_id)
-      SELECT c.client_id, lc.case_id
+      INSERT INTO involves (client_id, case_id, office_id)
+      SELECT c.client_id, lc.case_id, c.office_id
       FROM clients c
-      JOIN legal_cases lc ON lc.case_id = $2
+      JOIN legal_cases lc ON lc.case_id = $2 AND lc.office_id = c.office_id
       WHERE c.client_id = $1
+        AND ${officeClause}
       RETURNING client_id, case_id, party_role, is_primary
     `,
-    [body.client_id, caseId]
+    parameters
   );
   if (!result.rowCount) {
     throw new CaseServiceError(404, 'Case or client not found.');
@@ -550,15 +562,22 @@ export async function assignStaffToCase(actor, caseId, body) {
     invalid('user_id must be a valid UUID.');
   }
 
+  const parameters = [body.user_id, caseId];
+  const officeClause = officeCondition(actor, parameters, 'lc');
   const result = await execute(
     `
-      INSERT INTO assigned_to (user_id, case_id, assignment_role)
-      SELECT u.user_id, lc.case_id, r.role_name
+      INSERT INTO assigned_to (user_id, case_id, assignment_role, office_id)
+      SELECT u.user_id, lc.case_id, r.role_name, lc.office_id
       FROM app_users u
-      JOIN roles r ON r.role_id = u.role_id
       JOIN legal_cases lc ON lc.case_id = $2
+      JOIN office_memberships membership
+        ON membership.user_id = u.user_id
+        AND membership.office_id = lc.office_id
+        AND membership.status = 'active'
+      JOIN roles r ON r.role_id = membership.role_id
       LEFT JOIN lawyer_profiles lp ON lp.user_id = u.user_id
       WHERE u.user_id = $1
+        AND ${officeClause}
         AND u.status = 'active'
         AND (
           r.role_name = 'assistant'
@@ -569,7 +588,7 @@ export async function assignStaffToCase(actor, caseId, body) {
         )
       RETURNING user_id, case_id, assignment_role, assigned_at, is_lead
     `,
-    [body.user_id, caseId]
+    parameters
   );
   if (!result.rowCount) {
     throw new CaseServiceError(404, 'Case or eligible staff member not found.');
