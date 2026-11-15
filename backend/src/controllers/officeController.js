@@ -12,6 +12,7 @@ import {
   selectActiveOffice,
 } from '../services/officeService.js';
 import { listOffices, reviewOffice, updateAccountStatus } from '../services/platformService.js';
+import { notifyLater } from '../services/notificationService.js';
 
 const handle = (action, status = 200) => async (request, response, next) => {
   try {
@@ -23,7 +24,11 @@ const handle = (action, status = 200) => async (request, response, next) => {
 };
 
 export const registerOfficeController = handle(
-  async (request) => ({ office: await registerOffice(request.user, request.body) }),
+  async (request) => {
+    const office = await registerOffice(request.user, request.body);
+    notifyLater('office.registered', { officeName: office.name, actorUserId: request.user.user_id });
+    return { office };
+  },
   201
 );
 
@@ -57,22 +62,26 @@ export const previewInvitationController = handle(
   async (request) => ({ invitation: await previewInvitation(request.params.token) })
 );
 
-export const acceptInvitationController = handle(
-  (request) => acceptInvitation(
+export const acceptInvitationController = handle(async (request) => {
+  const accepted = await acceptInvitation(
     request.user,
     request.session?.session?.id,
     request.params.token,
     request.body
-  )
-);
+  );
+  notifyLater('member.joined', { officeId: accepted.office_id, role: accepted.role, actorUserId: request.user.user_id });
+  return accepted;
+});
 
 export const listPlatformOfficesController = handle(
   async (request) => ({ offices: await listOffices(request.user, request.query) })
 );
 
-export const reviewOfficeController = handle(
-  async (request) => ({ office: await reviewOffice(request.user, request.params.officeId, request.body) })
-);
+export const reviewOfficeController = handle(async (request) => {
+  const office = await reviewOffice(request.user, request.params.officeId, request.body);
+  notifyLater('office.reviewed', { officeId: office.office_id, status: office.status, actorUserId: request.user.user_id });
+  return { office };
+});
 
 export const updateAccountStatusController = handle(
   async (request) => ({ user: await updateAccountStatus(request.user, request.params.userId, request.body) })

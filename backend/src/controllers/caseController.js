@@ -7,6 +7,7 @@ import {
   listCases,
   updateCase,
 } from '../services/caseService.js';
+import { notifyLater } from '../services/notificationService.js';
 
 export async function listCasesController(request, response, next) {
   try {
@@ -42,6 +43,9 @@ export async function updateCaseController(request, response, next) {
       request.params.caseId,
       request.body
     );
+    if (request.body && Object.hasOwn(request.body, 'status')) {
+      notifyLater('case.status_changed', { officeId: request.user.office_id, actorUserId: request.user.user_id, caseId: caseRecord.case_id, status: caseRecord.status });
+    }
     return response.status(200).json({ case: caseRecord });
   } catch (error) {
     return next(error);
@@ -67,6 +71,7 @@ export async function linkClientToCaseController(request, response, next) {
       request.params.caseId,
       request.body
     );
+    notifyLater('case.client_linked', { officeId: request.user.office_id, actorUserId: request.user.user_id, caseId: relationship.case_id, clientId: relationship.client_id });
     return response.status(201).json({ relationship });
   } catch (error) {
     return next(error);
@@ -80,6 +85,7 @@ export async function assignStaffToCaseController(request, response, next) {
       request.params.caseId,
       request.body
     );
+    notifyLater('case.staff_assigned', { officeId: request.user.office_id, actorUserId: request.user.user_id, caseId: assignment.case_id, userId: assignment.user_id });
     return response.status(201).json({ assignment });
   } catch (error) {
     return next(error);

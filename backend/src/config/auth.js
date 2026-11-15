@@ -6,6 +6,8 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 
 import { pool } from './db.js';
 import { getSecurityConfig } from './security.js';
+import { passwordResetEmail, sendMail } from '../services/mailService.js';
+import { portalContext, portalsFor } from '../services/portalAccess.js';
 
 const secret = process.env.BETTER_AUTH_SECRET || process.env.AUTH_SECRET;
 
@@ -20,16 +22,12 @@ const securityConfig = getSecurityConfig();
 const RESET_TOKEN_TTL_SECONDS = 60 * 60;
 
 /**
- * No mail transport is configured in this project yet. Outside production the reset link is
- * written to the server console so the flow can be exercised locally; in production the
- * request succeeds silently until a real mailer replaces this function.
+ * Sent through mailService (Resend). Without RESEND_API_KEY the link is written to the console
+ * outside production. The request answers the same either way, so it never reveals whether the
+ * address has an account.
  */
 async function sendResetPassword({ user, url }) {
-  if (securityConfig.production) {
-    console.warn('Password reset requested but no mail transport is configured.');
-    return;
-  }
-  console.info(`[dev mail] Password reset link for ${user.email}: ${url}`);
+  await sendMail({ to: user.email, ...passwordResetEmail({ url }) });
 }
 
 const db = isUnitTest
@@ -159,6 +157,27 @@ function createAtomicAuthAdapter(rootDb) {
                 code: 'ACCOUNT_INACTIVE',
                 message: 'This account is inactive or suspended.',
               });
+            }
+
+            // The sign-in page of one audience refuses accounts of another, still after the
+            // password check and before any session exists (see services/portalAccess.js).
+            const requested = portalContext.getStore()?.portal;
+            if (requested) {
+              const memberships = await db.executeQuery(
+                sql`SELECT u.is_platform_admin, r.role_name AS role, membership.is_owner
+                    FROM app_users u
+                    LEFT JOIN office_memberships membership ON membership.user_id = u.user_id
+                    LEFT JOIN roles r ON r.role_id = membership.role_id
+                    WHERE u.auth_user_id = ${sessionUserId}`.compile(db)
+              );
+              const portals = portalsFor(memberships.rows);
+              if (!portals.includes(requested)) {
+                throw new APIError('FORBIDDEN', {
+                  code: 'WRONG_PORTAL',
+                  message: 'This account does not sign in from this page.',
+                  portals,
+                });
+              }
             }
           }
 

@@ -2,33 +2,21 @@
 <html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="قضيتي | Qadiyati — نظام ذكي لإدارة المكاتب القانونية" />
-    <meta name="theme-color" content="#2b372d" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="preconnect" href="https://images.unsplash.com" crossorigin />
-    <title>قضيتي | Qadiyati</title>
-    <!--
-      Boot script: applies saved language/direction and theme BEFORE first paint
-      to avoid a flash of the wrong theme or a direction jump. Keys mirror src/lib/storage.ts.
-    -->
-    <script>
-      ;(function () {
-        var root = document.documentElement
-        try {
-          var lang = localStorage.getItem('qadiyati.lang')
-          if (lang === 'en' || lang === 'ar') {
-            root.lang = lang
-            root.dir = lang === 'ar' ? 'rtl' : 'ltr'
-          }
-          var theme = localStorage.getItem('qadiyati.theme')
-          var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
-          if (dark) root.classList.add('dark')
-        } catch (e) {}
-      })()
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="قضيتي — نظام إدارة مكاتب المحاماة" />
+    <meta name="theme-color" content="#061d33" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>قضيتي</title>
   </head>
   <body>
+    <!-- Ink roughness for rubber stamps: referenced as filter:url(#ink) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="ink">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="n" />
+        <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -0.9 1.28" result="m" />
+        <feComposite in="SourceGraphic" in2="m" operator="in" />
+      </filter>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

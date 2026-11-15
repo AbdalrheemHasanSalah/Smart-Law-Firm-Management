@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import { pool, query } from '../config/db.js';
 import { getSecurityConfig } from '../config/security.js';
+import { invitationEmail, sendMail } from './mailService.js';
 import { hasOfficeContext } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,10 +132,17 @@ export async function createInvitation(actor, body) {
      RETURNING invitation_id, email, client_id, expires_at, created_at, accepted_at, revoked_at`,
     [actor.office_id, email, clientId, hashToken(token), INVITATION_TTL_DAYS, actor.user_id, body.role]
   );
+  const url = invitationUrl(token);
+  const office = await query('SELECT name FROM law_offices WHERE office_id = $1', [actor.office_id]);
+  const emailSent = await sendMail({
+    to: email,
+    ...invitationEmail({ officeName: office.rows[0]?.name ?? '', role: body.role, url }),
+  });
   return {
     invitation: publicInvitation({ ...result.rows[0], role: body.role }),
-    // No mailer is configured yet, so the administrator shares this single-use link directly.
-    invite_url: invitationUrl(token),
+    // Returned even when the email went out, so the administrator can also share it directly.
+    invite_url: url,
+    email_sent: emailSent,
   };
 }
 

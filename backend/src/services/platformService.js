@@ -35,7 +35,8 @@ export async function listOffices(actor, queryParameters = {}) {
   const result = await query(
     `SELECT office.office_id, office.name, office.email, office.phone, office.city, office.address,
             office.license_number, office.status, office.review_note, office.reviewed_at,
-            office.created_at, owner.full_name AS owner_name, owner.email AS owner_email,
+            office.created_at, owner.user_id AS owner_user_id, owner.full_name AS owner_name,
+            owner.email AS owner_email, owner.status AS owner_account_status,
             profile.bar_number AS owner_bar_number, profile.license_status AS owner_license_status
        FROM law_offices office
        JOIN app_users owner ON owner.user_id = office.created_by_user_id

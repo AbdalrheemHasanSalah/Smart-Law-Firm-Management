@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createOriginProtection } from './middleware/originProtection.js';
 import { createRateLimit } from './middleware/rateLimit.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
+import { withRequestedPortal } from './services/portalAccess.js';
 
 const app = express();
 const securityConfig = getSecurityConfig();
@@ -32,6 +33,7 @@ app.use(createOriginProtection({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/auth/sign-in/email', withRequestedPortal);
 app.all('/api/auth/*', authHandler);
 app.use('/api', apiRoutes);
 app.get('/', (_request, response) => {

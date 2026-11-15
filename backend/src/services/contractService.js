@@ -145,7 +145,19 @@ function parseListOptions(parameters = {}) {
   return { page, pageSize, offset, clientId, caseId, status, search };
 }
 
+// HTTP header values are limited to Latin-1, so browsers cannot send Arabic text in them.
+// Clients therefore percent-encode upload metadata; plain ASCII values pass through unchanged.
+function decodeHeaderValue(value) {
+  if (typeof value !== 'string' || !value.includes('%')) return value;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseMetadataValue(value, field, maxLength) {
+  value = decodeHeaderValue(value);
   if (typeof value !== 'string') invalid(`${field} must be a string.`);
   const normalized = value.trim();
   if (!normalized || normalized.length > maxLength) {

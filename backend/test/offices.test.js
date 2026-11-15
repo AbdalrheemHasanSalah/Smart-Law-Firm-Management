@@ -273,6 +273,8 @@ test('invitations store only a token hash and return a single-use link', async (
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(storedHash, createHash('sha256').update(token).digest('hex'));
   assert.equal(JSON.stringify(body.invitation).includes(token), false);
+  // No RESEND_API_KEY in tests: nothing is sent, and the response says so.
+  assert.equal(body.email_sent, false);
 });
 
 test('a client invitation can only target an unlinked client record of the same office', async (t) => {
@@ -383,6 +385,27 @@ test('platform office review is limited to platform administrators', async (t) =
   setup(t, { role: 'admin', office_id: officeA, is_platform_admin: false });
   assert.equal((await request('GET', '/api/platform/offices')).status, 403);
   assert.equal((await request('PATCH', `/api/platform/offices/${officeA}`, { status: 'active' })).status, 403);
+});
+
+test('the platform office list includes the owner account and filters by status', async (t) => {
+  const office = {
+    office_id: officeA, name: 'Office', email: null, phone: '+970 59 123 4567', city: 'Nablus',
+    address: null, license_number: null, status: 'pending', review_note: null, reviewed_at: null,
+    created_at: '2026-01-01T00:00:00.000Z', owner_user_id: appUserId, owner_name: 'Office Owner',
+    owner_email: 'owner@office.ps', owner_account_status: 'active', owner_bar_number: 'PBA-1',
+    owner_license_status: 'pending',
+  };
+  const calls = setup(t, { is_platform_admin: true }, async (sql) => (
+    sql.includes('FROM law_offices office') ? { rowCount: 1, rows: [office] } : { rowCount: 0, rows: [] }
+  ));
+  const response = await request('GET', '/api/platform/offices?status=pending');
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).offices, [office]);
+  const list = calls.find(({ sql }) => sql.includes('FROM law_offices office'));
+  assert.match(list.sql, /owner.user_id AS owner_user_id/);
+  assert.match(list.sql, /owner.status AS owner_account_status/);
+  assert.deepEqual(list.parameters, ['pending']);
+  assert.equal((await request('GET', '/api/platform/offices?status=archived')).status, 400);
 });
 
 test('approving an office verifies the owner licence; suspending clears open sessions', async (t) => {
