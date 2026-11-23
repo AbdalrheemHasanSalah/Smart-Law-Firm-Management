@@ -1,4 +1,5 @@
 import { auth } from '../config/auth.js';
+import { subscriptionSummary } from '../config/subscription.js';
 import { listMemberships } from '../services/officeService.js';
 
 function selectFields(value, fields) {
@@ -32,6 +33,8 @@ async function sessionContext(request) {
     role: request.user.role ?? null,
     active_office: activeOffice,
     memberships,
+    // State of the active office's subscription, so the app can warn before and explain after a lock.
+    subscription: request.user.office_id ? subscriptionSummary(request.user.subscription_ends_at) : null,
   };
 }
 

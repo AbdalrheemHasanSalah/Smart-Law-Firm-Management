@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Send } from 'lucide-react'
+import { ArrowRight, Search, Send, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router'
 import { useAuth } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
 import { ROLE } from '@/lib/labels'
@@ -16,6 +17,21 @@ const initialsOf = (name: string) =>
     .slice(0, 2)
     .map((part) => part[0])
     .join(' ')
+
+/**
+ * Arabic-friendly matching: hamza forms of alef, taa marbuta / haa and alef maqsura / yaa are
+ * treated alike, and diacritics and tatweel are ignored, so "محمد" finds "مُحمّد" and
+ * "اسامة" finds "أسامه".
+ */
+export const normalizeName = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[\u064B-\u0652\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim()
 
 const timeOf = new Intl.DateTimeFormat('ar-PS-u-nu-latn', { hour: 'numeric', minute: '2-digit' })
 const dayOf = new Intl.DateTimeFormat('ar-PS-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -56,10 +72,17 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 border-b border-ink/10 px-4 py-3">
-        <button type="button" onClick={onBack} aria-label="العودة إلى جهات الاتصال" className="grid size-9 place-items-center rounded-full text-ink-soft hover:bg-ink/6 md:hidden">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="العودة إلى جهات الاتصال"
+          className="grid size-9 place-items-center rounded-full text-ink-soft hover:bg-ink/6 md:hidden"
+        >
           <ArrowRight className="size-5" aria-hidden="true" />
         </button>
-        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-desk text-sm font-bold text-paper">{initialsOf(contact.full_name)}</span>
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-desk text-sm font-bold text-paper">
+          {initialsOf(contact.full_name)}
+        </span>
         <div className="leading-tight">
           <p className="font-semibold text-ink">{contact.full_name}</p>
           <p className="text-xs text-ink-faint">{ROLE[contact.role]}</p>
@@ -82,8 +105,18 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
             return (
               <div key={message.message_id}>
                 {showDay && <p className="my-3 text-center text-xs text-ink-faint">{day}</p>}
-                <motion.div initial={{ opacity: 0, y: 10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.2 }} className={cn('flex', mine ? 'justify-start' : 'justify-end')}>
-                  <div className={cn('max-w-[80%] rounded-2xl px-4 py-2.5 shadow-sm', mine ? 'rounded-ss-md bg-desk text-paper' : 'rounded-se-md bg-white text-ink')}>
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.2 }}
+                  className={cn('flex', mine ? 'justify-start' : 'justify-end')}
+                >
+                  <div
+                    className={cn(
+                      'max-w-[80%] rounded-2xl px-4 py-2.5 shadow-sm',
+                      mine ? 'rounded-ss-md bg-desk text-paper' : 'rounded-se-md bg-white text-ink',
+                    )}
+                  >
                     <p className="leading-relaxed whitespace-pre-wrap">{message.body}</p>
                     <p className={cn('mt-1 text-[0.68rem]', mine ? 'text-paper/60' : 'text-ink-faint')}>
                       {timeOf.format(new Date(message.sent_at))}
@@ -99,7 +132,11 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
       </div>
 
       <form onSubmit={submit} className="border-t border-ink/10 p-3">
-        {send.isError && <p role="alert" className="mb-2 text-sm text-stamp">{messageOf(send.error)}</p>}
+        {send.isError && (
+          <p role="alert" className="mb-2 text-sm text-stamp">
+            {messageOf(send.error)}
+          </p>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={text}
@@ -113,7 +150,12 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
             aria-label="نص الرسالة"
             className="max-h-32 min-h-11 flex-1 resize-none rounded-2xl border border-ink/20 bg-white px-4 py-2.5 text-ink placeholder:text-ink-faint focus:border-stamp-blue focus:outline-none"
           />
-          <button type="submit" disabled={!text.trim() || send.isPending} aria-label="إرسال" className="grid size-11 shrink-0 place-items-center rounded-full bg-stamp text-paper transition-[transform,background-color] hover:bg-[#c00a17] active:scale-95 disabled:opacity-40">
+          <button
+            type="submit"
+            disabled={!text.trim() || send.isPending}
+            aria-label="إرسال"
+            className="grid size-11 shrink-0 place-items-center rounded-full bg-stamp text-paper transition-[transform,background-color] hover:bg-[#c00a17] active:scale-95 disabled:opacity-40"
+          >
             <Send className="size-5 rtl:-scale-x-100" aria-hidden="true" />
           </button>
         </div>
@@ -126,17 +168,39 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
 export const Messages = () => {
   const { session } = useAuth()
   const isClient = session?.role === 'client'
-  const [openId, setOpenId] = useState<string | null>(null)
+  // The open conversation lives in the address (?with=…), so the side-bar link and the back
+  // button return to the list of contacts.
+  const [params, setParams] = useSearchParams()
+  const openId = params.get('with')
+  const setOpenId = (id: string | null) => setParams(id ? { with: id } : {})
+  const [filter, setFilter] = useState('')
   const contacts = useQuery({
     queryKey: ['messages', 'contacts'],
     refetchInterval: 15_000,
     queryFn: async () => (await api.get<{ contacts: Contact[] }>('/messages/contacts')).data.contacts,
   })
   const open = contacts.data?.find((contact) => contact.user_id === openId) ?? null
+  const needle = normalizeName(filter)
+  // Search by name or by role ("موكّل", "محامٍ"), so a lawyer can list just their clients.
+  const shown = (contacts.data ?? []).filter(
+    (contact) =>
+      !needle ||
+      normalizeName(contact.full_name).includes(needle) ||
+      normalizeName(ROLE[contact.role] ?? '').includes(needle),
+  )
 
   return (
     <>
-      <SheetHeader title="الرسائل" note={isClient ? 'راسل المحامين المسندين إلى قضاياك.' : session?.role === 'admin' ? 'راسل أعضاء مكتبك وموكّليه.' : 'راسل موكّلي قضاياك وصاحب المكتب.'} />
+      <SheetHeader
+        title="الرسائل"
+        note={
+          isClient
+            ? 'راسل المحامين المسندين إلى قضاياك.'
+            : session?.role === 'admin'
+              ? 'راسل أعضاء مكتبك وموكّليه.'
+              : 'راسل موكّلي قضاياك وصاحب المكتب.'
+        }
+      />
       {contacts.isPending ? (
         <Loading />
       ) : contacts.isError ? (
@@ -145,30 +209,78 @@ export const Messages = () => {
         <Empty>{isClient ? 'لا يوجد محامٍ مسند إلى قضاياك بعد.' : 'لا جهات اتصال متاحة بعد.'}</Empty>
       ) : (
         <div className="grid h-[min(38rem,70dvh)] overflow-hidden rounded-xl border border-ink/10 md:grid-cols-[18rem_minmax(0,1fr)]">
-          <ul className={cn('overflow-y-auto border-ink/10 md:border-e', open && 'hidden md:block')} aria-label="جهات الاتصال">
-            {contacts.data.map((contact) => (
-              <li key={contact.user_id}>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(contact.user_id)}
-                  aria-current={contact.user_id === openId}
-                  className={cn('flex w-full items-center gap-3 border-b border-ink/6 px-4 py-3 text-start transition-colors', contact.user_id === openId ? 'bg-stamp/8' : 'hover:bg-paper-shade')}
-                >
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-desk text-sm font-bold text-paper">{initialsOf(contact.full_name)}</span>
-                  <span className="min-w-0 flex-1 leading-tight">
-                    <span className="block truncate font-semibold text-ink">{contact.full_name}</span>
-                    <span className="block text-xs text-ink-faint">
-                      {ROLE[contact.role]}
-                      {contact.last_message_at && ` · ${timeAgo(contact.last_message_at)}`}
+          <div className={cn('flex min-h-0 flex-col border-ink/10 md:border-e', open && 'hidden md:flex')}>
+            <div className="border-b border-ink/10 p-3">
+              <label className="flex items-center gap-2 rounded-full border border-ink/15 bg-paper-shade px-3 focus-within:border-stamp-blue focus-within:bg-white">
+                <Search className="size-4 shrink-0 text-ink-faint" aria-hidden="true" />
+                <input
+                  type="search"
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                  placeholder={isClient ? 'ابحث باسم المحامي' : 'ابحث بالاسم أو الصفة'}
+                  aria-label="البحث في جهات الاتصال"
+                  className="h-10 min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-faint focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+                />
+                {filter && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter('')}
+                    aria-label="مسح البحث"
+                    className="grid size-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-ink/10 hover:text-ink"
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </label>
+              {needle && (
+                <p className="mt-2 px-1 text-xs text-ink-faint" aria-live="polite">
+                  {shown.length ? `${shown.length} من ${contacts.data.length}` : 'لا نتائج'}
+                </p>
+              )}
+            </div>
+            <ul className="min-h-0 flex-1 overflow-y-auto" aria-label="جهات الاتصال">
+              {shown.length === 0 && (
+                <li className="px-4 py-8 text-center text-sm text-ink-faint">لا أحد بهذا الاسم بين جهات اتصالك.</li>
+              )}
+              {shown.map((contact) => (
+                <li key={contact.user_id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(contact.user_id)}
+                    aria-current={contact.user_id === openId}
+                    className={cn(
+                      'flex w-full items-center gap-3 border-b border-ink/6 px-4 py-3 text-start transition-colors',
+                      contact.user_id === openId ? 'bg-stamp/8' : 'hover:bg-paper-shade',
+                    )}
+                  >
+                    <span className="grid size-10 shrink-0 place-items-center rounded-full bg-desk text-sm font-bold text-paper">
+                      {initialsOf(contact.full_name)}
                     </span>
-                  </span>
-                  {contact.unread_count > 0 && <span className="grid min-w-6 place-items-center rounded-full bg-stamp px-1.5 text-xs leading-6 font-bold text-paper">{contact.unread_count}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate font-semibold text-ink">{contact.full_name}</span>
+                      <span className="block text-xs text-ink-faint">
+                        {ROLE[contact.role]}
+                        {contact.last_message_at && ` · ${timeAgo(contact.last_message_at)}`}
+                      </span>
+                    </span>
+                    {contact.unread_count > 0 && (
+                      <span className="grid min-w-6 place-items-center rounded-full bg-stamp px-1.5 text-xs leading-6 font-bold text-paper">
+                        {contact.unread_count}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
           <div className={cn('min-h-0', !open && 'hidden md:block')}>
-            {open ? <Thread key={open.user_id} contact={open} onBack={() => setOpenId(null)} /> : <p className="grid h-full place-items-center px-6 text-center text-ink-faint">اختر جهة اتصال لفتح المحادثة.</p>}
+            {open ? (
+              <Thread key={open.user_id} contact={open} onBack={() => setOpenId(null)} />
+            ) : (
+              <p className="grid h-full place-items-center px-6 text-center text-ink-faint">
+                اختر جهة اتصال لفتح المحادثة.
+              </p>
+            )}
           </div>
         </div>
       )}

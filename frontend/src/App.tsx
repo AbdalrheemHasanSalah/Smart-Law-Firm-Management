@@ -6,7 +6,9 @@ import Landing from './pages/Landing'
 import { Today } from './pages/Office'
 import { CaseFile, Cases, Clients, Contracts, Documents, Tasks, Team } from './pages/Workspace'
 import { Messages } from './pages/Messages'
-import { Platform, Portal } from './pages/Others'
+import { OfficeRequest, Platform } from './pages/OfficeRequests'
+import { Portal } from './pages/Others'
+import { OfficeSubscription, PlatformSubscriptions } from './pages/Subscriptions'
 import { Shell } from './ui/Shell'
 
 const STAFF = ['admin', 'lawyer', 'assistant'] as const
@@ -41,6 +43,9 @@ export const App = () => (
       <Route path={`${PATHS.office}/messages`} element={office(<Messages />)} />
       <Route path={`${PATHS.client}/messages`} element={<Require roles={['client']}><Shell><Messages /></Shell></Require>} />
       <Route path={PATHS.client} element={<Require roles={['client']}><Shell><Portal /></Shell></Require>} />
+      <Route path={`${PATHS.office}/subscription`} element={office(<OfficeSubscription />, ['admin'])} />
+      <Route path={`${PATHS.platform}/subscriptions`} element={<Require platform><Shell><PlatformSubscriptions /></Shell></Require>} />
+      <Route path={`${PATHS.platform}/offices/:officeId`} element={<Require platform><Shell><OfficeRequest /></Shell></Require>} />
       <Route path={PATHS.platform} element={<Require platform><Shell><Platform /></Shell></Require>} />
       <Route path="*" element={<Navigate to={PATHS.home} replace />} />
     </Routes>

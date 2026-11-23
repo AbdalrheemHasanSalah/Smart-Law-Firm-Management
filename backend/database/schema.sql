@@ -98,8 +98,32 @@ CREATE TABLE IF NOT EXISTS law_offices (
     reviewed_by_user_id UUID REFERENCES app_users(user_id),
     created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Paid (or trial) access runs until this moment; NULL means no subscription is tracked.
+    subscription_ends_at TIMESTAMPTZ,
+    -- The subscription_ends_at value a renewal reminder was last sent for.
+    subscription_reminder_sent_for TIMESTAMPTZ
 );
+
+-- Office subscription payments: recorded by the platform owner, or paid online by the office.
+CREATE TABLE IF NOT EXISTS subscription_payments (
+    payment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency CHAR(3) NOT NULL,
+    months INTEGER NOT NULL CHECK (months BETWEEN 1 AND 24),
+    method VARCHAR(20) NOT NULL CHECK (method IN ('cash', 'bank_transfer', 'cheque', 'online')),
+    status VARCHAR(20) NOT NULL DEFAULT 'paid' CHECK (status IN ('pending', 'paid', 'failed')),
+    reference VARCHAR(120),
+    provider_session_id VARCHAR(255) UNIQUE,
+    period_start TIMESTAMPTZ,
+    period_end TIMESTAMPTZ,
+    recorded_by_user_id UUID REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    paid_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS subscription_payments_office_idx
+    ON subscription_payments (office_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS office_memberships (
     office_id UUID NOT NULL REFERENCES law_offices(office_id),

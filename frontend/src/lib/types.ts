@@ -25,6 +25,8 @@ export type Session = {
   role: OfficeRole | null
   active_office: Membership | null
   memberships: Membership[]
+  /** The active office's subscription; null without an active office. */
+  subscription?: SubscriptionSummary | null
 }
 
 export type Pagination = { page: number; pageSize: number; total: number; totalPages: number }
@@ -180,4 +182,48 @@ export type NotificationItem = {
   notification_type: string
   read_at: string | null
   created_at: string
+}
+
+export type SubscriptionState = 'active' | 'grace' | 'expired' | 'none'
+
+export type SubscriptionSummary = {
+  state: SubscriptionState
+  ends_at: string | null
+  grace_ends_at: string | null
+  /** Days until the period ends (active) or until the office is locked (grace). */
+  days_left: number | null
+}
+
+export type SubscriptionPlan = { monthly_price: number; currency: string; grace_days: number; trial_days: number }
+
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'cheque' | 'online'
+
+export type SubscriptionPayment = {
+  payment_id: string
+  amount: number
+  currency: string
+  months: number
+  method: PaymentMethod
+  status: 'pending' | 'paid' | 'failed'
+  reference: string | null
+  period_start: string | null
+  period_end: string | null
+  created_at: string
+  paid_at: string | null
+  recorded_by_name?: string | null
+}
+
+export type OfficeSubscriptionRow = {
+  office_id: string
+  name: string
+  city: string | null
+  status: OfficeStatus
+  owner_name: string
+  owner_email: string
+  last_paid_at: string | null
+  last_amount: number | null
+  last_currency: string | null
+  last_method: PaymentMethod | null
+  paid_total: number
+  subscription: SubscriptionSummary
 }

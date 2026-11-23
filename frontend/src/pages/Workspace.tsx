@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { personaOf, useAuth } from '@/auth/auth'
 import { api, API_URL, DEMO, messageOf } from '@/lib/api'
+import { oneOf, useParam } from '@/lib/useParam'
 import {
   ACCESS_LEVEL,
   CASE_STATUS,
@@ -459,7 +460,9 @@ const CaseDocuments = ({ caseId }: { caseId: string }) => {
 export const CaseFile = () => {
   const { caseId = '' } = useParams()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<TabKey>('people')
+  const [tabParam, setTabParam] = useParam('tab')
+  const tab = oneOf(tabParam, TABS.map(([key]) => key), 'people')
+  const setTab = (key: TabKey) => setTabParam(key === 'people' ? null : key)
   const record = useQuery({
     queryKey: ['case', caseId],
     queryFn: async () => (await api.get<{ case: LegalCase }>(`/cases/${caseId}`)).data.case,
@@ -753,7 +756,9 @@ export const Tasks = () => {
   const owner = useIsOwner()
   const tasks = useTasks()
   const cases = useCases()
-  const [filter, setFilter] = useState<(typeof TASK_FILTERS)[number][0]>('open')
+  const [filterParam, setFilterParam] = useParam('filter')
+  const filter = oneOf(filterParam, TASK_FILTERS.map(([key]) => key), 'open')
+  const setFilter = (key: (typeof TASK_FILTERS)[number][0]) => setFilterParam(key === 'open' ? null : key)
   const [adding, setAdding] = useState(false)
   const rows = (tasks.data ?? []).filter((task) => (filter === 'all' ? true : filter === 'completed' ? task.status === 'completed' : task.status === 'pending' || task.status === 'in_progress'))
   return (

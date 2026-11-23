@@ -1,5 +1,6 @@
 import { auth } from '../config/auth.js';
 import { query } from '../config/db.js';
+import { isSubscriptionLocked } from '../config/subscription.js';
 
 export function isSessionExpired(session) {
   if (!session?.session?.expiresAt) {
@@ -39,7 +40,8 @@ export async function getCurrentUserFromRequest(request, session) {
         u.updated_at,
         CASE WHEN office.office_id IS NOT NULL THEN membership.role_id END AS role_id,
         CASE WHEN office.office_id IS NOT NULL THEN r.role_name END AS role,
-        office.office_id
+        office.office_id,
+        office.subscription_ends_at
       FROM app_users u
       JOIN sessions s
         ON s.user_id = u.auth_user_id
@@ -121,7 +123,12 @@ export async function requireSession(request, response, next) {
   }
 }
 
-export function requireRole(allowedRoles) {
+/**
+ * Allows the listed office roles. An office whose subscription and grace period have both ended
+ * is locked for everyone (SUBSCRIPTION_EXPIRED) except on routes that opt out with
+ * `allowLockedSubscription`, such as the owner's subscription page.
+ */
+export function requireRole(allowedRoles, { allowLockedSubscription = false } = {}) {
   return (request, response, next) => {
     const user = request.user;
     const normalizedAllowedRoles = Array.isArray(allowedRoles)
@@ -139,6 +146,13 @@ export function requireRole(allowedRoles) {
       return response.status(403).json({
         code: 'FORBIDDEN',
         error: 'You do not have permission to access this resource.',
+      });
+    }
+
+    if (!allowLockedSubscription && isSubscriptionLocked(user.subscription_ends_at)) {
+      return response.status(403).json({
+        code: 'SUBSCRIPTION_EXPIRED',
+        error: 'The office subscription has expired.',
       });
     }
 

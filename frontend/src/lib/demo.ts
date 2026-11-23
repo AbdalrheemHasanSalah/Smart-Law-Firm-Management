@@ -15,6 +15,10 @@ import type {
   Membership,
   Message,
   NotificationItem,
+  OfficeSubscriptionRow,
+  PaymentMethod,
+  SubscriptionPayment,
+  SubscriptionSummary,
   OfficeRole,
   PlatformOffice,
   Session,
@@ -154,6 +158,53 @@ const notifications: DemoNotification[] = [
   { notification_id: 'nt-7', user_id: 'u-client', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(40) },
 ]
 
+platformOffices.push(
+  { office_id: 'o-5', name: 'مكتب القدس للمحاماة', email: 'info@quds-law.ps', phone: '02 240 1188', city: 'رام الله', address: null, license_number: 'RM-2020-077', status: 'active', review_note: null, reviewed_at: daysFromNow(-300), created_at: daysFromNow(-302), owner_user_id: 'u-x4', owner_name: 'رامي عبد الله', owner_email: 'rami@quds-law.ps', owner_account_status: 'active', owner_bar_number: '4120' },
+  { office_id: 'o-6', name: 'مكتب النجاح القانوني', email: null, phone: '09 237 5521', city: 'نابلس', address: null, license_number: 'NB-2022-131', status: 'active', review_note: null, reviewed_at: daysFromNow(-150), created_at: daysFromNow(-152), owner_user_id: 'u-x5', owner_name: 'سلمى يعيش', owner_email: 'salma@najah-law.ps', owner_account_status: 'active', owner_bar_number: '5571' },
+)
+
+/* ───────────── subscriptions (same rules as the backend) ───────────── */
+
+const PLAN = { monthly_price: 100, currency: 'ILS', grace_days: 7, trial_days: 30 }
+const subscriptionEnds: Record<string, string | null> = {
+  'o-1': daysFromNow(5),
+  'o-4': daysFromNow(-40),
+  'o-5': daysFromNow(-12),
+  'o-6': daysFromNow(-3),
+}
+type DemoPayment = SubscriptionPayment & { office_id: string }
+const subscriptionPayments: DemoPayment[] = [
+  { payment_id: 'sp-1', office_id: 'o-1', amount: 300, currency: 'ILS', months: 3, method: 'bank_transfer', status: 'paid', reference: 'TR-20418', period_start: daysFromNow(-85), period_end: daysFromNow(5), created_at: daysFromNow(-85), paid_at: daysFromNow(-85), recorded_by_name: 'مدير المنصّة' },
+  { payment_id: 'sp-2', office_id: 'o-1', amount: 100, currency: 'ILS', months: 1, method: 'cash', status: 'paid', reference: null, period_start: daysFromNow(-115), period_end: daysFromNow(-85), created_at: daysFromNow(-115), paid_at: daysFromNow(-115), recorded_by_name: 'مدير المنصّة' },
+  { payment_id: 'sp-3', office_id: 'o-5', amount: 600, currency: 'ILS', months: 6, method: 'online', status: 'paid', reference: 'pi_3Q8x', period_start: daysFromNow(-192), period_end: daysFromNow(-12), created_at: daysFromNow(-192), paid_at: daysFromNow(-192), recorded_by_name: null },
+  { payment_id: 'sp-4', office_id: 'o-6', amount: 100, currency: 'ILS', months: 1, method: 'cheque', status: 'paid', reference: 'CHQ-7781', period_start: daysFromNow(-33), period_end: daysFromNow(-3), created_at: daysFromNow(-33), paid_at: daysFromNow(-33), recorded_by_name: 'مدير المنصّة' },
+]
+
+const summaryOf = (endsAt: string | null | undefined): SubscriptionSummary => {
+  if (!endsAt) return { state: 'none', ends_at: null, grace_ends_at: null, days_left: null }
+  const end = new Date(endsAt).getTime()
+  const graceEnd = end + PLAN.grace_days * 86_400_000
+  const now = Date.now()
+  const state = now >= graceEnd ? 'expired' : now >= end ? 'grace' : 'active'
+  const target = state === 'active' ? end : graceEnd
+  return { state, ends_at: new Date(end).toISOString(), grace_ends_at: new Date(graceEnd).toISOString(), days_left: Math.max(0, Math.ceil((target - now) / 86_400_000)) }
+}
+
+/** Extends an office from the later of now and its end date, as the backend does. */
+const recordPayment = (officeId: string, amount: number, months: number, method: PaymentMethod, reference: string | null, recorder: string | null) => {
+  const current = subscriptionEnds[officeId]
+  const start = new Date(Math.max(Date.now(), current ? new Date(current).getTime() : 0))
+  const end = new Date(start)
+  end.setMonth(end.getMonth() + months)
+  subscriptionEnds[officeId] = end.toISOString()
+  const payment: DemoPayment = { payment_id: uid('sp'), office_id: officeId, amount, currency: PLAN.currency, months, method, status: 'paid', reference, period_start: start.toISOString(), period_end: end.toISOString(), created_at: new Date().toISOString(), paid_at: new Date().toISOString(), recorded_by_name: recorder }
+  subscriptionPayments.unshift(payment)
+  if (officeId === OFFICE) {
+    notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', read_at: null, created_at: payment.created_at })
+  }
+  return payment
+}
+
 /* ───────────── session ───────────── */
 
 const KEY = 'qadiyati.demo.user'
@@ -171,6 +222,7 @@ const sessionOf = (user: DemoUser): Session => {
     role: user.role,
     active_office: memberships[0] ?? null,
     memberships,
+    subscription: memberships[0] ? summaryOf(subscriptionEnds[OFFICE]) : null,
   }
 }
 
@@ -389,6 +441,40 @@ const routes: Route[] = [
     return { ok: true }
   }],
 
+  // subscriptions
+  ['get', /^\/platform\/subscriptions$/, ['platform'], () => ({
+    plan: PLAN,
+    offices: platformOffices
+      .filter((office) => office.status === 'active' || office.status === 'suspended')
+      .map((office): OfficeSubscriptionRow => {
+        const paid = subscriptionPayments.filter((payment) => payment.office_id === office.office_id && payment.status === 'paid')
+        const last = paid[0]
+        return { office_id: office.office_id, name: office.name, city: office.city, status: office.status, owner_name: office.owner_name, owner_email: office.owner_email, last_paid_at: last?.paid_at ?? null, last_amount: last?.amount ?? null, last_currency: last?.currency ?? null, last_method: last?.method ?? null, paid_total: paid.reduce((sum, payment) => sum + payment.amount, 0), subscription: summaryOf(subscriptionEnds[office.office_id]) }
+      })
+      .sort((a, b) => (a.subscription.ends_at ?? '').localeCompare(b.subscription.ends_at ?? '')),
+  })],
+  ['get', /^\/platform\/offices\/([^/]+)\/payments$/, ['platform'], ({ params }) => ({ payments: subscriptionPayments.filter((payment) => payment.office_id === params[0]) })],
+  ['post', /^\/platform\/offices\/([^/]+)\/payments$/, ['platform'], ({ params, body }) => {
+    const amount = Number(body.amount)
+    const months = Number(body.months)
+    if (!(amount > 0) || !Number.isInteger(months) || months < 1 || months > 24 || !['cash', 'bank_transfer', 'cheque'].includes(String(body.method))) throw fail(400, 'VALIDATION')
+    const payment = recordPayment(params[0]!, amount, months, body.method as PaymentMethod, (body.reference as string)?.trim() || null, 'مدير المنصّة')
+    return { payment, subscription_ends_at: subscriptionEnds[params[0]!] }
+  }],
+  ['get', /^\/offices\/current\/subscription$/, ['admin'], () => ({
+    subscription: summaryOf(subscriptionEnds[OFFICE]),
+    plan: PLAN,
+    online_payments: true,
+    payments: subscriptionPayments.filter((payment) => payment.office_id === OFFICE).map(({ recorded_by_name: _recorder, ...payment }) => payment),
+  })],
+  ['post', /^\/offices\/current\/subscription\/checkout$/, ['admin'], ({ body }) => {
+    // Demo stand-in for Stripe Checkout: the payment succeeds at once and the browser returns.
+    const months = Number(body.months)
+    if (!Number.isInteger(months) || months < 1 || months > 12) throw fail(400, 'VALIDATION')
+    recordPayment(OFFICE, PLAN.monthly_price * months, months, 'online', 'demo', null)
+    return { checkout_url: `${location.origin}/office/subscription?payment=success` }
+  }],
+
   // platform
   ['get', /^\/platform\/offices$/, ['platform'], () => ({ offices: platformOffices })],
   ['patch', /^\/platform\/offices\/([^/]+)$/, ['platform'], ({ params, body }) => {
@@ -496,7 +582,9 @@ export const demoAdapter: AxiosAdapter = (config) =>
     window.setTimeout(() => {
       const respond = (status: number, data: unknown) => ({ data, status, statusText: String(status), headers: {}, config, request: null })
       try {
-        resolve(respond(200, handle(config)))
+        // Serialised, as over a network: the app must never hold references into the demo store,
+        // or in-place updates here would change its cache without React noticing.
+        resolve(respond(200, JSON.parse(JSON.stringify(handle(config) ?? null))))
       } catch (error) {
         if (error instanceof Reply) {
           reject(new AxiosError('Demo request failed', 'ERR_BAD_REQUEST', config, null, respond(error.status, error.body) as never))

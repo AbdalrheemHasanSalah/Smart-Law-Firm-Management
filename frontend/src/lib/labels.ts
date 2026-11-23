@@ -110,3 +110,30 @@ export const PARTY_ROLE: Record<string, string> = {
 /** Turns `{ open: {text}, … }` into `[value, text]` pairs for a <SelectField>. */
 export const optionsOf = (labels: Record<string, Label | string>) =>
   Object.entries(labels).map(([value, label]) => [value, typeof label === 'string' ? label : label.text] as const)
+
+export const SUBSCRIPTION_STATE: Record<string, string> = {
+  active: 'فعّال',
+  grace: 'في مهلة السماح',
+  expired: 'متوقف',
+  none: 'بدون اشتراك',
+}
+
+export const PAYMENT_METHOD: Record<string, string> = {
+  cash: 'نقداً',
+  bank_transfer: 'تحويل بنكي',
+  cheque: 'شيك',
+  online: 'دفع إلكتروني',
+}
+
+export const PAYMENT_STATUS: Record<string, Label> = {
+  paid: { text: 'مدفوعة', tone: 'green' },
+  pending: { text: 'قيد الدفع', tone: 'blue' },
+  failed: { text: 'لم تكتمل', tone: 'ink' },
+}
+
+/** "اليوم", "يوم واحد", "يومين", "5 أيام", "12 يوماً". */
+export const daysText = (days: number) =>
+  days <= 0 ? 'اليوم' : days === 1 ? 'يوم واحد' : days === 2 ? 'يومين' : days <= 10 ? `${days} أيام` : `${days} يوماً`
+
+export const formatMoney = (amount: number, currency = 'ILS') =>
+  new Intl.NumberFormat('ar-PS-u-nu-latn', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount)

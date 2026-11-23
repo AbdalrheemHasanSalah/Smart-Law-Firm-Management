@@ -1,4 +1,5 @@
 import { pool, query } from '../config/db.js';
+import { getSubscriptionConfig } from '../config/subscription.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OFFICE_STATUSES = new Set(['pending', 'active', 'rejected', 'suspended']);
@@ -71,11 +72,16 @@ export async function reviewOffice(actor, officeId, body) {
   try {
     await client.query('BEGIN');
     const updated = await client.query(
+      // The first approval starts the free trial; approving again later never adds a new one.
       `UPDATE law_offices
-          SET status = $2, review_note = $3, reviewed_at = NOW(), reviewed_by_user_id = $4, updated_at = NOW()
+          SET status = $2, review_note = $3, reviewed_at = NOW(), reviewed_by_user_id = $4, updated_at = NOW(),
+              subscription_ends_at = CASE
+                WHEN $2 = 'active' THEN COALESCE(subscription_ends_at, NOW() + make_interval(days => $5::int))
+                ELSE subscription_ends_at
+              END
         WHERE office_id = $1
         RETURNING office_id, name, status, review_note, reviewed_at, created_by_user_id`,
-      [officeId, body.status, note, actor.user_id]
+      [officeId, body.status, note, actor.user_id, getSubscriptionConfig().trialDays]
     );
     if (!updated.rowCount) throw new PlatformServiceError(404, 'Office not found.', 'NOT_FOUND');
 

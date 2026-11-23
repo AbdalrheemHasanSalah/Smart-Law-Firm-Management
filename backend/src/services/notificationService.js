@@ -70,7 +70,9 @@ const PLATFORM_OWNERS = `
   FROM app_users
   WHERE is_platform_admin = TRUE AND status = 'active'`;
 
-const CASE_LABEL = 'SELECT case_number, title FROM legal_cases WHERE case_id = $1 AND office_id = $2';
+const DATE_FORMAT = new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' });
+
+const CASE_LABEL ='SELECT case_number, title FROM legal_cases WHERE case_id = $1 AND office_id = $2';
 const OFFICE_NAME = 'SELECT name FROM law_offices WHERE office_id = $1';
 
 function appUrl(pathname) {
@@ -203,6 +205,36 @@ async function plan(event, payload, query) {
         people: audience([receiver], actorUserId), officeId, type: 'message',
         title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${payload.senderName ?? 'أحد أعضاء المكتب'}.`,
         path: payload.receiverRole === 'client' ? '/portal/messages' : '/office/messages', button: 'افتح الرسائل',
+      }];
+    }
+    case 'subscription.paid': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      const until = payload.endsAt ? ` حتى ${DATE_FORMAT.format(new Date(payload.endsAt))}` : '';
+      const messages = [{
+        people: audience([owner], actorUserId), officeId, type: 'subscription',
+        title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال${until}.`,
+        path: '/office/subscription', button: 'افتح صفحة الاشتراك',
+      }];
+      if (payload.online) {
+        // Payments made online reach the platform owner by email only (no office of theirs to list it in).
+        const [office] = await rows(OFFICE_NAME, [officeId]);
+        const platformOwners = await rows(PLATFORM_OWNERS, []);
+        messages.push({
+          people: audience([platformOwners], actorUserId), officeId: null, type: 'platform',
+          title: 'دفعة اشتراك إلكترونية', body: `دفع ${office ? `«${office.name}»` : 'أحد المكاتب'} اشتراكه إلكترونياً${until}.`,
+          path: '/platform/subscriptions', button: 'افتح الاشتراكات',
+        });
+      }
+      return messages;
+    }
+    case 'subscription.expiring': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      const date = DATE_FORMAT.format(new Date(payload.endsAt));
+      return [{
+        people: audience([owner], actorUserId), officeId, type: 'subscription',
+        title: 'اشتراك مكتبك ينتهي قريباً',
+        body: `ينتهي اشتراك مكتبك في ${date}. جدّده قبل ذلك حتى لا يتوقف عمل المكتب بعد انتهاء مهلة السماح.`,
+        path: '/office/subscription', button: 'جدّد الاشتراك',
       }];
     }
     case 'member.joined': {

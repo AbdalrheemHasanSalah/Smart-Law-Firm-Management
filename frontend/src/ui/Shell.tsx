@@ -1,6 +1,7 @@
 import {
   Briefcase,
   Building2,
+  CreditCard,
   FileSignature,
   FileText,
   LayoutDashboard,
@@ -9,18 +10,28 @@ import {
   MessagesSquare,
   Users,
   UsersRound,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 import { motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { PATHS, personaOf, useAuth, type Persona } from '@/auth/auth'
 import { DEMO } from '@/lib/api'
 import { formatDay, ROLE } from '@/lib/labels'
+import { SubscriptionBanner, SubscriptionLocked } from '@/pages/Subscriptions'
 import { NotificationBell, useUnreadMessages } from './Inbox'
 import { cn, Logo, type StampTone } from './kit'
 
-type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: 'messages' }
+type NavItem = {
+  to: string
+  label: string
+  icon: LucideIcon
+  end?: boolean
+  badge?: 'messages'
+  /** Also highlighted on pages under this path (for an entry that otherwise matches exactly). */
+  within?: string
+}
 
 const office = (extra: NavItem[] = []): NavItem[] => [
   { to: PATHS.office, label: 'الرئيسية', icon: LayoutDashboard, end: true },
@@ -34,8 +45,20 @@ const office = (extra: NavItem[] = []): NavItem[] => [
 ]
 
 const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
-  platform: { nav: [{ to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true }], label: 'إدارة المنصّة' },
-  owner: { nav: office([{ to: `${PATHS.office}/team`, label: 'الفريق', icon: UsersRound }]), label: 'صاحب المكتب' },
+  platform: {
+    nav: [
+      { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/` },
+      { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
+    ],
+    label: 'إدارة المنصّة',
+  },
+  owner: {
+    nav: office([
+      { to: `${PATHS.office}/team`, label: 'الفريق', icon: UsersRound },
+      { to: `${PATHS.office}/subscription`, label: 'الاشتراك', icon: CreditCard },
+    ]),
+    label: 'صاحب المكتب',
+  },
   lawyer: { nav: office(), label: 'فريق المكتب' },
   client: {
     nav: [
@@ -66,32 +89,45 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   const { nav, label } = PERSONA[persona]
   const roleName = persona === 'platform' ? 'مدير المنصّة' : persona === 'owner' ? 'صاحب المكتب' : ROLE[session?.role ?? 'lawyer']
   const signOut = () => void logout().then(() => navigate(PATHS.login))
+  // Every side-bar entry leads to the main page of its section. Clicking the section you are
+  // already in (inside a case, a conversation, a filtered list…) starts that page afresh: the
+  // link drops the query string, and the new key below remounts the page with its defaults.
+  const [visit, setVisit] = useState(0)
+  const isWithin = (prefix?: string) => Boolean(prefix && location.pathname.startsWith(prefix))
+  const restart = (to: string) => () => {
+    if (location.pathname !== to) return
+    setVisit((count) => count + 1)
+    window.scrollTo({ top: 0 })
+  }
   const hasInbox = persona !== 'platform'
+  // A lapsed office: every page but the owner's subscription page is replaced by an explanation.
+  const locked = session?.subscription?.state === 'expired' && location.pathname !== `${PATHS.office}/subscription`
 
   return (
     <div className="min-h-dvh bg-paper-shade lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)]">
       {/* side bar */}
       <aside className="desk sticky top-0 hidden h-dvh flex-col px-4 py-5 lg:flex">
-        <Link to={nav[0]!.to} aria-label="قضيتي" className="px-2">
+        <Link to={nav[0]!.to} onClick={restart(nav[0]!.to)} aria-label="قضيتي" className="px-2">
           <Logo onDesk />
         </Link>
         <p className="mt-6 px-3 text-[0.7rem] font-semibold text-paper/45">{label}</p>
         <nav aria-label="أقسام العمل" className="mt-2 flex-1 space-y-1 overflow-y-auto">
-          {nav.map(({ to, label: text, icon: Icon, end, badge }) => (
+          {nav.map(({ to, label: text, icon: Icon, end, badge, within }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
+              onClick={restart(to)}
               className={({ isActive }) =>
                 cn(
                   'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors duration-200',
-                  isActive ? 'text-paper' : 'text-paper/65 hover:bg-paper/8 hover:text-paper',
+                  isActive || isWithin(within) ? 'text-paper' : 'text-paper/65 hover:bg-paper/8 hover:text-paper',
                 )
               }
             >
               {({ isActive }) => (
                 <>
-                  {isActive && (
+                  {(isActive || isWithin(within)) && (
                     <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 380, damping: 32 }} className="absolute inset-0 rounded-xl bg-stamp shadow-[0_8px_18px_-8px_rgb(217_11_26/0.9)]" />
                   )}
                   <Icon className="relative size-[1.15rem] transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
@@ -119,7 +155,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
         <header className="sticky top-0 z-30 border-b border-ink/10 bg-paper/90 backdrop-blur-md">
           <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-8">
             <div className="flex min-w-0 items-center gap-3">
-              <Link to={nav[0]!.to} aria-label="قضيتي" className="lg:hidden">
+              <Link to={nav[0]!.to} onClick={restart(nav[0]!.to)} aria-label="قضيتي" className="lg:hidden">
                 <Logo />
               </Link>
               <div className="hidden min-w-0 leading-tight lg:block">
@@ -137,13 +173,14 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
             </div>
           </div>
           <nav aria-label="أقسام العمل" className="flex gap-1.5 overflow-x-auto px-4 pb-3 [scrollbar-width:none] lg:hidden">
-            {nav.map(({ to, label: text, icon: Icon, end, badge }) => (
+            {nav.map(({ to, label: text, icon: Icon, end, badge, within }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={end}
+                onClick={restart(to)}
                 className={({ isActive }) =>
-                  cn('flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold', isActive ? 'bg-stamp text-paper' : 'bg-ink/5 text-ink-soft')
+                  cn('flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold', isActive || isWithin(within) ? 'bg-stamp text-paper' : 'bg-ink/5 text-ink-soft')
                 }
               >
                 <Icon className="size-4" aria-hidden="true" />
@@ -154,16 +191,24 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
           </nav>
         </header>
 
-        {/* Keyed by path: each page fades up on arrival. No exit animation, so a page never
-            lingers after its route is gone. */}
+        <SubscriptionBanner />
+
+        {/* Keyed by path (and by side-bar restarts): each page fades up on arrival. No exit
+            animation, so a page never lingers after its route is gone. */}
         <motion.main
-          key={location.pathname}
+          key={`${location.pathname}#${visit}`}
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className="mx-auto w-full max-w-7xl p-4 sm:p-8"
         >
-          {plain ? children : <div className="rounded-2xl border border-ink/8 bg-white p-5 shadow-[0_10px_30px_-18px_rgb(6_29_51/0.35)] sm:p-7">{children}</div>}
+          {plain && !locked ? (
+            children
+          ) : (
+            <div className="rounded-2xl border border-ink/8 bg-white p-5 shadow-[0_10px_30px_-18px_rgb(6_29_51/0.35)] sm:p-7">
+              {locked ? <SubscriptionLocked /> : children}
+            </div>
+          )}
         </motion.main>
       </div>
     </div>
