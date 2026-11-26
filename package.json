@@ -1,0 +1,11 @@
+{
+  "name": "smart-law-firm-management",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:init": "npm --prefix backend run db:init",
+    "start": "npm --prefix backend start",
+    "dev:backend": "npm --prefix backend run dev"
+  }
+}

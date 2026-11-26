@@ -1,0 +1,39 @@
+# Keeps the Qadiyati API running: starts it at boot and restarts it if it stops.
+#
+# Install:  sudo cp qadiyati-api.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now qadiyati-api
+# Logs:     sudo journalctl -u qadiyati-api -f
+
+[Unit]
+Description=Qadiyati API (Node.js)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=qadiyati
+Group=qadiyati
+WorkingDirectory=/opt/qadiyati/backend
+# Production mode is set here and not in .env, so maintenance scripts run by hand
+# (npm run platform-admin:grant) are not refused.
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+
+# Hardening: the service sees the system read-only and can write only its document folders.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/qadiyati/backend/private-documents /opt/qadiyati/backend/uploads
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
