@@ -9,6 +9,7 @@ const { default: app } = await import('../src/app.js');
 
 const authUserId = 'auth-user-id';
 const adminUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const targetUserId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const session = {
   user: { id: authUserId },
@@ -22,6 +23,7 @@ const adminUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const targetUser = {
@@ -86,7 +88,7 @@ function setupRequest(t, role = 'admin', databaseHandler = async () => ({ rowCou
 
 function mockStatusTransaction(
   t,
-  { userExists = true, previousStatus = 'active', failOnDelete = false } = {}
+  { userExists = true, previousStatus = 'active', failOnSessionClear = false } = {}
 ) {
   const calls = [];
   const client = {
@@ -95,7 +97,7 @@ function mockStatusTransaction(
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
         return { rowCount: null, rows: [] };
       }
-      if (sql.includes('SELECT status, auth_user_id FROM app_users')) {
+      if (sql.includes('FROM office_memberships membership') && sql.includes('FOR UPDATE OF membership')) {
         return userExists
           ? {
               rowCount: 1,
@@ -103,13 +105,13 @@ function mockStatusTransaction(
             }
           : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('UPDATE app_users') && sql.includes('SET status')) {
+      if (sql.includes('UPDATE office_memberships') && sql.includes('SET status')) {
         return userExists
           ? { rowCount: 1, rows: [{ user_id: targetUserId }] }
           : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('DELETE FROM sessions')) {
-        if (failOnDelete) throw new Error('session deletion failed');
+      if (sql.includes('UPDATE sessions SET active_office_id = NULL')) {
+        if (failOnSessionClear) throw new Error('session update failed');
         return { rowCount: 1, rows: [] };
       }
       assert.fail(`Unexpected transaction query: ${sql}`);
@@ -156,8 +158,9 @@ test('administrator can list users with bounded pagination and safe fields', asy
     totalPages: 1,
   });
   assert.deepEqual(calls[0].parameters, [authUserId, session.session.id]);
-  assert.deepEqual(calls[1].parameters, ['%Taylor%', 'lawyer', 'active']);
-  assert.deepEqual(calls[2].parameters, ['%Taylor%', 'lawyer', 'active', 50, 50]);
+  assert.match(calls[1].sql, /membership\.office_id = \$1/);
+  assert.deepEqual(calls[1].parameters, [officeId, '%Taylor%', 'lawyer', 'active']);
+  assert.deepEqual(calls[2].parameters, [officeId, '%Taylor%', 'lawyer', 'active', 50, 50]);
 });
 
 test('clients, assistants, and lawyers cannot list users or change roles', async (t) => {
@@ -209,11 +212,12 @@ test('invalid identifiers, list filters, and mass-assignment fields are rejected
 
 test('administrator can change another user role using an allowlisted role', async (t) => {
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
-    if (sql.includes('UPDATE app_users AS u')) {
-      assert.deepEqual(parameters, [targetUserId, 'assistant']);
+    if (sql.includes('UPDATE office_memberships AS membership')) {
+      assert.match(sql, /membership\.office_id = \$3/);
+      assert.deepEqual(parameters, [targetUserId, 'assistant', officeId]);
       return { rowCount: 1, rows: [{ user_id: targetUserId }] };
     }
-    if (sql.includes('FROM app_users u') && sql.includes('WHERE u.user_id = $1')) {
+    if (sql.includes('JOIN app_users u') && sql.includes('WHERE u.user_id = $1')) {
       return { rowCount: 1, rows: [{ ...targetUser, role: 'assistant' }] };
     }
     return { rowCount: 0, rows: [] };
@@ -224,7 +228,7 @@ test('administrator can change another user role using an allowlisted role', asy
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).user.role, 'assistant');
-  assert.deepEqual(calls[1].parameters, [targetUserId, 'assistant']);
+  assert.deepEqual(calls[1].parameters, [targetUserId, 'assistant', officeId]);
 });
 
 test('administrator cannot change their own role or suspend themselves', async (t) => {
@@ -241,13 +245,14 @@ test('administrator cannot change their own role or suspend themselves', async (
 test('missing users return 404 and status changes update only the requested account', async (t) => {
   const transactionCalls = mockStatusTransaction(t);
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
-    if (sql.includes('FROM app_users u') && sql.includes('WHERE u.user_id = $1')) {
+    if (sql.includes('JOIN app_users u') && sql.includes('WHERE u.user_id = $1')) {
+      assert.match(sql, /membership\.office_id = \$2/);
       if (parameters[0] === adminUserId) {
         return { rowCount: 0, rows: [] };
       }
       return { rowCount: 1, rows: [{ ...targetUser, status: 'suspended' }] };
     }
-    if (sql.includes('FROM app_users u') && sql.includes('WHERE u.user_id')) {
+    if (sql.includes('JOIN app_users u') && sql.includes('WHERE u.user_id')) {
       return { rowCount: 0, rows: [] };
     }
     return { rowCount: 0, rows: [] };
@@ -265,17 +270,18 @@ test('missing users return 404 and status changes update only the requested acco
     'BEGIN',
     'SELECT',
     'UPDATE',
-    'DELETE',
+    'UPDATE',
     'COMMIT',
   ]);
-  assert.deepEqual(transactionCalls[1].parameters, [targetUserId]);
-  assert.deepEqual(transactionCalls[2].parameters, [targetUserId, 'suspended']);
-  assert.deepEqual(transactionCalls[3].parameters, [targetUser.auth_user_id]);
-  assert.deepEqual(calls[3].parameters, [targetUserId]);
+  assert.deepEqual(transactionCalls[1].parameters, [targetUserId, officeId]);
+  assert.deepEqual(transactionCalls[2].parameters, [targetUserId, 'suspended', officeId]);
+  // Only this office is removed from the member's sessions; the account and other offices are untouched.
+  assert.deepEqual(transactionCalls[3].parameters, [targetUser.auth_user_id, officeId]);
+  assert.deepEqual(calls[3].parameters, [targetUserId, officeId]);
 });
 
-test('session-revocation failure rolls back the account status change', async (t) => {
-  const transactionCalls = mockStatusTransaction(t, { failOnDelete: true });
+test('session-update failure rolls back the membership status change', async (t) => {
+  const transactionCalls = mockStatusTransaction(t, { failOnSessionClear: true });
   const calls = setupRequest(t);
 
   const response = await request('PATCH', `/api/users/${targetUserId}/status`, {
@@ -287,7 +293,7 @@ test('session-revocation failure rolls back the account status change', async (t
     'BEGIN',
     'SELECT',
     'UPDATE',
-    'DELETE',
+    'UPDATE',
     'ROLLBACK',
   ]);
   assert.equal(calls.length, 1, 'The user response must not be queried after the transaction fails.');
@@ -310,10 +316,12 @@ test('a missing status target rolls back without attempting session revocation',
   assert.equal(calls.length, 1);
 });
 
-test('reactivation revokes any session created while the account was inactive', async (t) => {
+// A suspended membership can never be selected as a session's active office, so reactivating it
+// has no sessions to revoke.
+test('reactivation restores the membership without touching sessions', async (t) => {
   const transactionCalls = mockStatusTransaction(t, { previousStatus: 'suspended' });
   setupRequest(t, 'admin', async (sql) => {
-    if (sql.includes('FROM app_users u') && sql.includes('WHERE u.user_id = $1')) {
+    if (sql.includes('JOIN app_users u') && sql.includes('WHERE u.user_id = $1')) {
       return { rowCount: 1, rows: [{ ...targetUser, status: 'active' }] };
     }
     return { rowCount: 0, rows: [] };
@@ -328,8 +336,7 @@ test('reactivation revokes any session created while the account was inactive', 
     'BEGIN',
     'SELECT',
     'UPDATE',
-    'DELETE',
     'COMMIT',
   ]);
-  assert.deepEqual(transactionCalls[3].parameters, [targetUser.auth_user_id]);
+  assert.deepEqual(transactionCalls[2].parameters, [targetUserId, 'active', officeId]);
 });

@@ -1,4 +1,6 @@
 import { pool, query } from '../config/db.js';
+import { auditLater, diffValues, pickValues } from './auditService.js';
+import { officeCondition } from './officeScope.js';
 
 const CLIENT_FIELDS = [
   'client_id',
@@ -7,6 +9,7 @@ const CLIENT_FIELDS = [
   'phone',
   'email',
   'address',
+  'national_id',
   'created_at',
 ];
 const CLIENT_FIELD_SET = new Set([
@@ -15,7 +18,9 @@ const CLIENT_FIELD_SET = new Set([
   'phone',
   'email',
   'address',
+  'national_id',
 ]);
+const AUDITED_CLIENT_FIELDS = ['client_type', 'full_name_or_org', 'phone', 'email', 'address', 'national_id'];
 const CONTACT_FIELD_SET = new Set(['phone', 'email', 'address']);
 const CLIENT_TYPES = new Set(['individual', 'organization']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -125,6 +130,21 @@ function validateAndNormalizeFields(body, { selfService = false, create = false 
     }
   }
 
+  if (Object.hasOwn(body, 'national_id')) {
+    if (body.national_id === null) {
+      fields.national_id = null;
+    } else {
+      if (typeof body.national_id !== 'string') {
+        invalid('national_id must be a string or null.');
+      }
+      const nationalId = body.national_id.trim();
+      if (nationalId.length > 30 || (nationalId && !/^[\p{L}\p{N}\s-]+$/u.test(nationalId))) {
+        invalid('national_id must contain at most 30 letters, digits or dashes.');
+      }
+      fields.national_id = nationalId || null;
+    }
+  }
+
   if (Object.hasOwn(body, 'address')) {
     if (body.address === null) {
       fields.address = null;
@@ -207,8 +227,9 @@ function assertRole(actor, roles) {
 }
 
 function staffScope(actor, parameters) {
+  const office = `AND ${officeCondition(actor, parameters, 'c')}`;
   if (actor.role !== 'lawyer' && actor.role !== 'assistant') {
-    return '';
+    return office;
   }
 
   if (typeof actor.user_id !== 'string' || !UUID_PATTERN.test(actor.user_id)) {
@@ -217,6 +238,7 @@ function staffScope(actor, parameters) {
 
   parameters.push(actor.user_id);
   return `
+    ${office}
     AND EXISTS (
       SELECT 1
       FROM involves i
@@ -230,6 +252,28 @@ function staffScope(actor, parameters) {
 function publicClient(row) {
   if (!row) return null;
   return Object.fromEntries(CLIENT_FIELDS.map((field) => [field, row[field]]));
+}
+
+/**
+ * A client's access to the client portal: no account yet, invited (a link is waiting), or an
+ * account that is active or suspended by the office.
+ */
+function portalOf(row) {
+  if (row.portal_user_id) {
+    return {
+      status: row.portal_membership_status === 'active' ? 'active' : 'suspended',
+      user_id: row.portal_user_id,
+    };
+  }
+  if (row.portal_invitation_id) {
+    return {
+      status: 'invited',
+      invitation_id: row.portal_invitation_id,
+      invited_email: row.portal_invitation_email,
+      expires_at: row.portal_invitation_expires_at,
+    };
+  }
+  return { status: 'none' };
 }
 
 function publicCase(row) {
@@ -268,6 +312,8 @@ export async function listClients(actor, queryParameters) {
       AND (
         c.full_name_or_org ILIKE ${searchParameter} ESCAPE E'\\\\'
         OR c.email ILIKE ${searchParameter} ESCAPE E'\\\\'
+        OR c.phone ILIKE ${searchParameter} ESCAPE E'\\\\'
+        OR c.national_id ILIKE ${searchParameter} ESCAPE E'\\\\'
       )
     `;
   }
@@ -285,6 +331,8 @@ export async function listClients(actor, queryParameters) {
 
   const total = countResult.rows[0].total;
   const pageParameters = [...parameters, pageSize, offset];
+  // The office administrator also sees each client's portal account: invited, active or suspended.
+  const withPortal = actor.role === 'admin';
   const listResult = await execute(
     `
       SELECT
@@ -294,8 +342,29 @@ export async function listClients(actor, queryParameters) {
         c.phone,
         c.email,
         c.address,
+        c.national_id,
         c.created_at
+        ${withPortal ? `,
+        c.user_id AS portal_user_id,
+        membership.status AS portal_membership_status,
+        pending.invitation_id AS portal_invitation_id,
+        pending.email AS portal_invitation_email,
+        pending.expires_at AS portal_invitation_expires_at` : ''}
       FROM clients c
+      ${withPortal ? `
+      LEFT JOIN office_memberships membership
+        ON membership.office_id = c.office_id AND membership.user_id = c.user_id
+      LEFT JOIN LATERAL (
+        SELECT invitation.invitation_id, invitation.email, invitation.expires_at
+          FROM office_invitations invitation
+         WHERE invitation.office_id = c.office_id
+           AND invitation.client_id = c.client_id
+           AND invitation.accepted_at IS NULL
+           AND invitation.revoked_at IS NULL
+           AND invitation.expires_at > NOW()
+         ORDER BY invitation.created_at DESC
+         LIMIT 1
+      ) pending ON TRUE` : ''}
       WHERE TRUE
       ${scope}
       ${searchClause}
@@ -307,7 +376,7 @@ export async function listClients(actor, queryParameters) {
   );
 
   return {
-    clients: listResult.rows.map(publicClient),
+    clients: listResult.rows.map((row) => (withPortal ? { ...publicClient(row), portal: portalOf(row) } : publicClient(row))),
     pagination: {
       page,
       pageSize,
@@ -331,6 +400,7 @@ export async function getClientById(actor, clientId) {
         c.phone,
         c.email,
         c.address,
+        c.national_id,
         c.created_at
       FROM clients c
       WHERE c.client_id = $1
@@ -352,20 +422,20 @@ export async function listClientCases(actor, clientId, queryParameters = {}) {
 
   const { page, pageSize, search, offset } = parseListOptions(queryParameters);
   const parameters = [clientId];
-  let accessClause = '';
+  let accessClause = `AND ${officeCondition(actor, parameters, 'c')}`;
 
   if (actor.role === 'client') {
     if (typeof actor.user_id !== 'string' || !UUID_PATTERN.test(actor.user_id)) {
       throw new ClientServiceError(403, 'You do not have permission to access this resource.');
     }
     parameters.push(actor.user_id);
-    accessClause = `AND c.user_id = $${parameters.length}`;
+    accessClause += ` AND c.user_id = $${parameters.length}`;
   } else if (actor.role === 'lawyer' || actor.role === 'assistant') {
     if (typeof actor.user_id !== 'string' || !UUID_PATTERN.test(actor.user_id)) {
       throw new ClientServiceError(403, 'You do not have permission to access this resource.');
     }
     parameters.push(actor.user_id);
-    accessClause = `
+    accessClause += `
       AND EXISTS (
         SELECT 1
         FROM assigned_to assignment
@@ -430,21 +500,21 @@ export async function listClientCases(actor, clientId, queryParameters = {}) {
   );
 
   if (!total) {
-    let clientAccessClause = '';
     const clientAccessParameters = [clientId];
+    let clientAccessClause = `AND ${officeCondition(actor, clientAccessParameters, 'clients')}`;
     if (actor.role === 'client') {
       clientAccessParameters.push(actor.user_id);
-      clientAccessClause = 'AND user_id = $2';
+      clientAccessClause += ' AND user_id = $3';
     } else if (actor.role === 'lawyer' || actor.role === 'assistant') {
       clientAccessParameters.push(actor.user_id);
-      clientAccessClause = `
+      clientAccessClause += `
         AND EXISTS (
           SELECT 1
           FROM involves linked_case
           JOIN assigned_to assignment
             ON assignment.case_id = linked_case.case_id
           WHERE linked_case.client_id = clients.client_id
-            AND assignment.user_id = $2
+            AND assignment.user_id = $3
         )
       `;
     }
@@ -468,38 +538,71 @@ export async function listClientCases(actor, clientId, queryParameters = {}) {
   };
 }
 
+/** Checks the fields of a new client, by the same rules wherever the client is created. */
+export function validateNewClient(body) {
+  return validateAndNormalizeFields(body, { create: true });
+}
+
+/**
+ * Inserts an already validated client in the actor's office. `db` is the pool's `query` or a
+ * transaction's client, so a client can be created together with a case.
+ */
+export async function insertClient(db, actor, fields) {
+  try {
+    const result = await db.query(
+      `
+        INSERT INTO clients (
+          client_type,
+          full_name_or_org,
+          phone,
+          email,
+          address,
+          national_id,
+          office_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING
+          client_id,
+          client_type,
+          full_name_or_org,
+          phone,
+          email,
+          address,
+          national_id,
+          created_at
+      `,
+      [
+        fields.client_type,
+        fields.full_name_or_org,
+        fields.phone ?? null,
+        fields.email ?? null,
+        fields.address ?? null,
+        fields.national_id ?? null,
+        actor.office_id,
+      ]
+    );
+    return publicClient(result.rows[0]);
+  } catch (error) {
+    return handleDatabaseError(error);
+  }
+}
+
+/** Records a new client in the activity log, once it is stored for good. */
+export function auditClientCreated(actor, created) {
+  auditLater(actor, {
+    action: 'client_created',
+    entityType: 'client',
+    entityId: created.client_id,
+    details: { values: pickValues(created, AUDITED_CLIENT_FIELDS) },
+  });
+}
+
 export async function createClient(actor, body) {
   assertRole(actor, ['admin']);
-  const fields = validateAndNormalizeFields(body, { create: true });
-  const result = await execute(
-    `
-      INSERT INTO clients (
-        client_type,
-        full_name_or_org,
-        phone,
-        email,
-        address
-      )
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING
-        client_id,
-        client_type,
-        full_name_or_org,
-        phone,
-        email,
-        address,
-        created_at
-    `,
-    [
-      fields.client_type,
-      fields.full_name_or_org,
-      fields.phone ?? null,
-      fields.email ?? null,
-      fields.address ?? null,
-    ]
-  );
-
-  return publicClient(result.rows[0]);
+  const fields = validateNewClient(body);
+  const created = await insertClient({ query }, actor, fields);
+  auditClientCreated(actor, created);
+  return created;
 }
 
 export async function linkClientAccount(actor, clientId, body) {
@@ -528,9 +631,11 @@ export async function linkClientAccount(actor, clientId, body) {
     await client.query('BEGIN');
     transactionStarted = true;
 
+    const clientParameters = [clientId];
+    const clientOffice = officeCondition(actor, clientParameters, 'clients');
     const clientResult = await client.query(
-      'SELECT client_id, user_id FROM clients WHERE client_id = $1 FOR UPDATE',
-      [clientId]
+      `SELECT client_id, user_id, office_id FROM clients WHERE client_id = $1 AND ${clientOffice} FOR UPDATE`,
+      clientParameters
     );
     if (!clientResult.rowCount) {
       throw new ClientServiceError(404, 'Client not found.');
@@ -542,21 +647,25 @@ export async function linkClientAccount(actor, clientId, body) {
     const userResult = await client.query(
       `SELECT u.user_id
        FROM app_users u
-       JOIN roles r ON r.role_id = u.role_id
+       JOIN office_memberships membership
+         ON membership.user_id = u.user_id
+         AND membership.office_id = $2
+         AND membership.status = 'active'
+       JOIN roles r ON r.role_id = membership.role_id
        WHERE u.user_id = $1
          AND r.role_name = 'client'
          AND u.status = 'active'
          AND u.auth_user_id IS NOT NULL
        FOR UPDATE OF u`,
-      [userId]
+      [userId, clientResult.rows[0].office_id]
     );
     if (!userResult.rowCount) {
       throw new ClientServiceError(404, 'Eligible client account not found.');
     }
 
     const existingLink = await client.query(
-      'SELECT client_id FROM clients WHERE user_id = $1 AND client_id <> $2 LIMIT 1',
-      [userId, clientId]
+      'SELECT client_id FROM clients WHERE user_id = $1 AND client_id <> $2 AND office_id = $3 LIMIT 1',
+      [userId, clientId, clientResult.rows[0].office_id]
     );
     if (existingLink.rowCount) {
       throw new ClientServiceError(409, 'Application user is already linked to another client.');
@@ -572,7 +681,7 @@ export async function linkClientAccount(actor, clientId, body) {
         [clientId, userId]
       );
     } catch (error) {
-      if (error?.code === '23505' && error.constraint === 'clients_user_id_key') {
+      if (error?.code === '23505' && error.constraint === 'clients_office_user_key') {
         throw new ClientServiceError(409, 'Application user is already linked to another client.');
       }
       throw error;
@@ -582,14 +691,15 @@ export async function linkClientAccount(actor, clientId, body) {
     }
 
     const auditResult = await client.query(
-      `INSERT INTO audit_logs (action, entity_type, entity_id, details, user_id)
-       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      `INSERT INTO audit_logs (action, entity_type, entity_id, details, user_id, office_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6)`,
       [
         'client_account_linked',
         'client',
         clientId,
         JSON.stringify({ linked_user_id: userId }),
         actor.user_id,
+        clientResult.rows[0].office_id,
       ]
     );
     if (auditResult.rowCount !== 1) {
@@ -642,17 +752,21 @@ async function updateClientFields(actor, clientId, body, { selfService = false }
   let where = `c.client_id = $${parameters.length}`;
 
   if (selfService) {
+    where += ` AND ${officeCondition(actor, parameters, 'c')}`;
     parameters.push(actor.user_id);
     where += ` AND c.user_id = $${parameters.length}`;
   } else {
     where += staffScope(actor, parameters);
   }
 
+  // `previous` is the row as the statement found it, for the activity log.
   const result = await execute(
     `
       UPDATE clients c
       SET ${assignments.join(', ')}
-      WHERE ${where}
+      FROM clients previous
+      WHERE previous.client_id = c.client_id
+        AND ${where}
       RETURNING
         c.client_id,
         c.client_type,
@@ -660,7 +774,9 @@ async function updateClientFields(actor, clientId, body, { selfService = false }
         c.phone,
         c.email,
         c.address,
-        c.created_at
+        c.national_id,
+        c.created_at,
+        row_to_json(previous) AS previous
     `,
     parameters
   );
@@ -668,11 +784,24 @@ async function updateClientFields(actor, clientId, body, { selfService = false }
   if (!result.rowCount) {
     throw new ClientServiceError(404, 'Client not found.');
   }
-  return publicClient(result.rows[0]);
+  const updated = publicClient(result.rows[0]);
+  auditLater(actor, {
+    action: 'client_updated',
+    entityType: 'client',
+    entityId: updated.client_id,
+    details: { subject: updated.full_name_or_org, changes: diffValues(result.rows[0].previous, updated, AUDITED_CLIENT_FIELDS) },
+  });
+  return updated;
 }
 
 export function updateClient(actor, clientId, body) {
   return updateClientFields(actor, clientId, body);
+}
+
+function ownOffice(actor) {
+  const parameters = [];
+  officeCondition(actor, parameters, 'c');
+  return parameters[0];
 }
 
 export async function getOwnClient(actor) {
@@ -686,12 +815,14 @@ export async function getOwnClient(actor) {
         c.phone,
         c.email,
         c.address,
+        c.national_id,
         c.created_at
       FROM clients c
       WHERE c.user_id = $1
+        AND c.office_id = $2
       LIMIT 1
     `,
-    [actor.user_id]
+    [actor.user_id, ownOffice(actor)]
   );
 
   if (!result.rowCount) {
@@ -708,12 +839,14 @@ export async function updateOwnClient(actor, body) {
   const assignments = entries.map(
     ([field], index) => `${field} = $${index + 1}`
   );
+  const officeClause = officeCondition(actor, parameters, 'c');
   parameters.push(actor.user_id);
   const result = await execute(
     `
       UPDATE clients c
       SET ${assignments.join(', ')}
       WHERE c.user_id = $${parameters.length}
+        AND ${officeClause}
       RETURNING
         c.client_id,
         c.client_type,
@@ -721,6 +854,7 @@ export async function updateOwnClient(actor, body) {
         c.phone,
         c.email,
         c.address,
+        c.national_id,
         c.created_at
     `,
     parameters

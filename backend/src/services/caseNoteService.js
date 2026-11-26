@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VISIBILITIES = new Set(['internal', 'case_team', 'client_visible']);
@@ -114,12 +115,13 @@ function validateBody(body, { create = false, actorRole } = {}) {
 }
 
 function noteAccessScope(actor, parameters, alias = 'n') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
 
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
   if (actor.role === 'lawyer' || actor.role === 'assistant') {
-    return `AND EXISTS (
+    return `${office} AND EXISTS (
       SELECT 1
       FROM assigned_to assignment
       WHERE assignment.case_id = ${alias}.case_id
@@ -127,7 +129,7 @@ function noteAccessScope(actor, parameters, alias = 'n') {
     )`;
   }
   if (actor.role === 'client') {
-    return `AND ${alias}.visibility = 'client_visible'
+    return `${office} AND ${alias}.visibility = 'client_visible'
       AND EXISTS (
         SELECT 1
         FROM involves linked_case
@@ -206,14 +208,18 @@ export async function createCaseNote(actor, caseId, body) {
   assertActor(actor, ['admin', 'lawyer', 'assistant']);
   validateUuid(caseId, 'caseId');
   const fields = validateBody(body, { create: true, actorRole: actor.role });
+  const parameters = [fields.body, fields.visibility ?? 'internal', actor.user_id, caseId];
+  const officeClause = officeCondition(actor, parameters, 'lc');
+  parameters.push(actor.role === 'admin');
   const result = await execute(
-    `INSERT INTO case_notes (body, visibility, case_id, user_id)
-     SELECT $1, $2, lc.case_id, creator.user_id
+    `INSERT INTO case_notes (body, visibility, case_id, user_id, office_id)
+     SELECT $1, $2, lc.case_id, creator.user_id, lc.office_id
        FROM legal_cases lc
        JOIN app_users creator ON creator.user_id = $3
       WHERE lc.case_id = $4
+        AND ${officeClause}
         AND (
-          creator.role_id IN (SELECT role_id FROM roles WHERE role_name = 'admin')
+          $6::boolean
           OR EXISTS (
             SELECT 1
             FROM assigned_to assignment
@@ -222,7 +228,7 @@ export async function createCaseNote(actor, caseId, body) {
           )
         )
      RETURNING note_id, body, visibility, created_at, updated_at, case_id`,
-    [fields.body, fields.visibility ?? 'internal', actor.user_id, caseId]
+    parameters
   );
   if (!result.rowCount) throw new CaseNoteServiceError(404, 'Case not found.');
   return publicNote(result.rows[0]);

@@ -10,6 +10,7 @@ const { default: app } = await import('../src/app.js');
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const session = {
   user: { id: authUserId },
   session: { id: 'session-id', expiresAt: '2999-01-01T00:00:00.000Z' },
@@ -22,6 +23,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const caseRecord = {
@@ -160,6 +162,7 @@ test('admins can create cases with schema-supported fields', async (t) => {
       null,
       null,
       null,
+      officeId,
     ]);
     return { rowCount: 1, rows: [{ ...caseRecord, case_number: 'CASE-002', title: 'New matter' }] };
   });
@@ -298,8 +301,10 @@ test('case search is parameterized, escaped, and pagination is capped', async (t
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.pagination.pageSize, 50);
-  assert.match(calls[1].sql, /case_number ILIKE \$1 ESCAPE E'\\\\'/);
-  assert.equal(calls[1].parameters[0], "%\\%\\_'%");
+  assert.match(calls[1].sql, /lc\.office_id = \$1/);
+  assert.match(calls[1].sql, /case_number ILIKE \$2 ESCAPE E'\\\\'/);
+  assert.equal(calls[1].parameters[0], officeId);
+  assert.equal(calls[1].parameters[1], "%\\%\\_'%");
   assert.equal(calls[2].parameters.at(-2), 50);
   assert.equal(calls[2].parameters.at(-1), 50);
   assert.match(calls[2].sql, /ORDER BY lc\.opened_at DESC, lc\.case_id ASC/);
@@ -346,7 +351,7 @@ test('case updates validate dates and do not allow null opened_at', async (t) =>
 test('admin updates an existing case using only allowlisted fields', async (t) => {
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /UPDATE legal_cases AS lc/);
-    assert.deepEqual(parameters, ['closed', caseId]);
+    assert.deepEqual(parameters, ['closed', caseId, officeId]);
     return { rowCount: 1, rows: [{ ...caseRecord, status: 'closed' }] };
   });
   const response = await request('PATCH', `/api/cases/${caseId}`, { status: 'closed' });
@@ -397,9 +402,10 @@ test('case queries use EXISTS so multiple client or assignment relationships do 
 test('admins can link an existing client to a case', async (t) => {
   const clientId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
-    assert.match(sql, /INSERT INTO involves \(client_id, case_id\)/);
-    assert.match(sql, /FROM clients c\s+JOIN legal_cases lc/);
-    assert.deepEqual(parameters, [clientId, caseId]);
+    assert.match(sql, /INSERT INTO involves \(client_id, case_id, office_id\)/);
+    assert.match(sql, /FROM clients c\s+JOIN legal_cases lc ON lc\.case_id = \$2 AND lc\.office_id = c\.office_id/);
+    assert.match(sql, /c\.office_id = \$3/);
+    assert.deepEqual(parameters, [clientId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -486,14 +492,15 @@ test('lawyer assignments require an active lawyer role and active lawyer profile
   const lawyerId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /LEFT JOIN lawyer_profiles lp ON lp\.user_id = u\.user_id/);
-    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
     assert.match(sql, /r\.role_name = 'assistant'/);
     assert.match(sql, /r\.role_name = 'lawyer'/);
     assert.match(sql, /OR\s*\(\s*r\.role_name = 'lawyer'\s+AND lp\.license_status = 'active'/);
     assert.match(sql, /u\.status = 'active'/);
     assert.match(sql, /lp\.license_status = 'active'/);
-    assert.deepEqual(parameters, [lawyerId, caseId]);
+    assert.match(sql, /membership\.office_id = lc\.office_id/);
+    assert.deepEqual(parameters, [lawyerId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -523,11 +530,11 @@ test('assistant assignments require an active assistant account but no lawyer pr
   const assistantId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
   const calls = setupRequest(t, 'admin', async (sql, parameters) => {
     assert.match(sql, /LEFT JOIN lawyer_profiles lp ON lp\.user_id = u\.user_id/);
-    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+    assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+    assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
     assert.match(sql, /r\.role_name = 'assistant'/);
     assert.match(sql, /u\.status = 'active'/);
-    assert.deepEqual(parameters, [assistantId, caseId]);
+    assert.deepEqual(parameters, [assistantId, caseId, officeId]);
     return {
       rowCount: 1,
       rows: [{
@@ -563,12 +570,12 @@ test('assistant eligibility does not extend to inactive users, clients, or unsup
   ]) {
     await t.test(`${ineligibleAccount.role} (${ineligibleAccount.status}) is rejected`, async (subtest) => {
       const calls = setupRequest(subtest, 'admin', async (sql, parameters) => {
-        assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role\)/);
-        assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name/);
+        assert.match(sql, /INSERT INTO assigned_to \(user_id, case_id, assignment_role, office_id\)/);
+        assert.match(sql, /SELECT u\.user_id, lc\.case_id, r\.role_name, lc\.office_id/);
         assert.match(sql, /r\.role_name = 'assistant'/);
         assert.match(sql, /OR\s*\(\s*r\.role_name = 'lawyer'\s+AND lp\.license_status = 'active'/);
         assert.match(sql, /u\.status = 'active'/);
-        assert.deepEqual(parameters, [ineligibleAccount.user_id, caseId]);
+        assert.deepEqual(parameters, [ineligibleAccount.user_id, caseId, officeId]);
         return { rowCount: 0, rows: [] };
       });
       const response = await request('POST', `/api/cases/${caseId}/assignments`, {
@@ -619,7 +626,7 @@ test('relationship details honor case access and only expose a client own profil
     assert.match(sql, /FROM assigned_to assignment/);
     assert.match(sql, /FROM involves i/);
     assert.match(sql, /json_agg/);
-    assert.match(sql, /AND c\.user_id = \$2/);
+    assert.match(sql, /AND c\.user_id = \$3/);
     assert.ok(parameters.includes(appUserId));
     assert.doesNotMatch(sql, /c\.email|c\.phone|c\.address/);
     return {
@@ -735,4 +742,173 @@ test('relationship details return 404 for inaccessible cases and empty arrays wh
     });
     assert.equal(calls.length, 2);
   });
+});
+
+const lawyerA = 'a1111111-1111-4111-8111-111111111111';
+const lawyerB = 'b2222222-2222-4222-8222-222222222222';
+const assistantC = 'c3333333-3333-4333-8333-333333333333';
+
+function mockStaffTransaction(t, staffRows) {
+  const statements = [];
+  t.mock.method(pool, 'connect', async () => ({
+    query: async (sql, parameters = []) => {
+      statements.push({ sql, parameters });
+      if (sql.includes('FROM legal_cases lc')) return { rowCount: 1, rows: [{ case_id: caseId, office_id: officeId }] };
+      if (sql.includes('FROM assigned_to assignment')) return { rowCount: staffRows.length, rows: staffRows };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  }));
+  return statements;
+}
+
+test('the office administrator cannot remove the only lawyer of a case', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockStaffTransaction(t, [
+    { user_id: lawyerA, assignment_role: 'lead_lawyer', is_lead: true, full_name: 'A' },
+    { user_id: assistantC, assignment_role: 'assistant', is_lead: false, full_name: 'C' },
+  ]);
+  const response = await request('DELETE', `/api/cases/${caseId}/assignments/${lawyerA}`);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, 'LAST_LAWYER');
+  assert.equal(statements.some(({ sql }) => sql.startsWith('DELETE')), false);
+  assert.equal(statements.at(-1).sql, 'ROLLBACK');
+  assert.match(statements[1].sql, /FOR UPDATE/);
+});
+
+test('removing the lead lawyer hands the lead to the remaining lawyer', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockStaffTransaction(t, [
+    { user_id: lawyerA, assignment_role: 'lawyer', is_lead: true, full_name: 'A' },
+    { user_id: lawyerB, assignment_role: 'lawyer', is_lead: false, full_name: 'B' },
+  ]);
+  const response = await request('DELETE', `/api/cases/${caseId}/assignments/${lawyerA}`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).removal.new_lead_user_id, lawyerB);
+  const removal = statements.find(({ sql }) => sql.startsWith('DELETE FROM assigned_to'));
+  assert.deepEqual(removal.parameters, [caseId, lawyerA, officeId]);
+  const promotion = statements.find(({ sql }) => sql.includes('SET is_lead = TRUE'));
+  assert.deepEqual(promotion.parameters, [caseId, lawyerB, officeId]);
+  assert.equal(statements.at(-1).sql, 'COMMIT');
+});
+
+test('an assistant can be removed even when the case has a single lawyer', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockStaffTransaction(t, [
+    { user_id: lawyerA, assignment_role: 'lawyer', is_lead: true, full_name: 'A' },
+    { user_id: assistantC, assignment_role: 'assistant', is_lead: false, full_name: 'C' },
+  ]);
+  const response = await request('DELETE', `/api/cases/${caseId}/assignments/${assistantC}`);
+  assert.equal(response.status, 200);
+  assert.equal(statements.some(({ sql }) => sql.includes('SET is_lead')), false);
+  assert.equal(statements.at(-1).sql, 'COMMIT');
+});
+
+test('only the office administrator removes case staff, and unknown members are not found', async (t) => {
+  for (const role of ['lawyer', 'assistant', 'client']) {
+    await t.test(role, async (subtest) => {
+      setupRequest(subtest, role);
+      assert.equal((await request('DELETE', `/api/cases/${caseId}/assignments/${lawyerA}`)).status, 403);
+    });
+  }
+  setupRequest(t, 'admin');
+  mockStaffTransaction(t, [{ user_id: lawyerA, assignment_role: 'lawyer', is_lead: true, full_name: 'A' }]);
+  assert.equal((await request('DELETE', `/api/cases/${caseId}/assignments/${lawyerB}`)).status, 404);
+  assert.equal((await request('DELETE', `/api/cases/${caseId}/assignments/not-a-uuid`)).status, 400);
+});
+
+/* ───────── opening a case together with its client ───────── */
+
+const clientA = 'd4444444-4444-4444-8444-444444444444';
+const newCase = { case_number: 'CASE-010', title: 'Lease dispute', case_type: 'civil' };
+
+function mockCaseTransaction(t, answer = () => undefined) {
+  const statements = [];
+  t.mock.method(pool, 'connect', async () => ({
+    query: async (sql, parameters = []) => {
+      statements.push({ sql, parameters });
+      const custom = await answer(sql, parameters);
+      if (custom) return custom;
+      if (sql.includes('INSERT INTO clients')) return { rowCount: 1, rows: [{ client_id: clientA, client_type: 'individual', full_name_or_org: 'Rami Saleh' }] };
+      if (sql.includes('FROM clients c')) return { rowCount: 1, rows: [{ client_id: clientA, full_name_or_org: 'Rami Saleh' }] };
+      if (sql.includes('INSERT INTO legal_cases')) return { rowCount: 1, rows: [{ ...caseRecord, case_number: 'CASE-010' }] };
+      if (sql.includes('FROM legal_cases lc')) return { rowCount: 1, rows: [{ case_id: caseId }] };
+      if (sql.includes('INSERT INTO involves')) return { rowCount: 1, rows: [{ client_id: clientA, case_id: caseId, party_role: 'client', is_primary: false }] };
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  }));
+  return statements;
+}
+
+test('a case opened with a new client stores the client, the case and the link in one transaction', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockCaseTransaction(t);
+  const response = await request('POST', '/api/cases', {
+    ...newCase,
+    new_client: { client_type: 'individual', full_name_or_org: ' Rami Saleh ', phone: '0599 123 456', national_id: '401234567' },
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual((await response.json()).case.client, { client_id: clientA, full_name_or_org: 'Rami Saleh' });
+  assert.deepEqual(statements.map(({ sql }) => sql.trim().split(/\s+/).slice(0, 3).join(' ')), [
+    'BEGIN', 'INSERT INTO clients', 'INSERT INTO legal_cases', 'INSERT INTO involves', 'COMMIT',
+  ]);
+  const client = statements[1];
+  assert.deepEqual(client.parameters, ['individual', 'Rami Saleh', '0599 123 456', null, null, '401234567', officeId]);
+  const link = statements[3];
+  assert.match(link.sql, /is_primary\) VALUES \(\$1, \$2, \$3, TRUE\)/);
+  assert.deepEqual(link.parameters, [clientA, caseId, officeId]);
+});
+
+test('a case opened for an existing client checks the client belongs to the office', async (t) => {
+  setupRequest(t, 'admin');
+  let statements = mockCaseTransaction(t);
+  assert.equal((await request('POST', '/api/cases', { ...newCase, client_id: clientA })).status, 201);
+  assert.match(statements[1].sql, /FROM clients c WHERE c\.client_id = \$1 AND c\.office_id = \$2 FOR SHARE/);
+  assert.deepEqual(statements[1].parameters, [clientA, officeId]);
+
+  // A client of another office is "not found", and nothing is stored.
+  t.mock.restoreAll();
+  setupRequest(t, 'admin');
+  statements = mockCaseTransaction(t, (sql) => (sql.includes('FROM clients c') ? { rowCount: 0, rows: [] } : undefined));
+  assert.equal((await request('POST', '/api/cases', { ...newCase, client_id: clientA })).status, 404);
+  assert.equal(statements.some(({ sql }) => sql.includes('INSERT')), false);
+  assert.equal(statements.at(-1).sql, 'ROLLBACK');
+});
+
+test('when the case cannot be stored, the new client is rolled back with it', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockCaseTransaction(t, (sql) => {
+    if (sql.includes('INSERT INTO legal_cases')) throw Object.assign(new Error('duplicate'), { code: '23505' });
+  });
+  const response = await request('POST', '/api/cases', { ...newCase, new_client: { client_type: 'individual', full_name_or_org: 'Rami' } });
+  assert.equal(response.status, 409);
+  assert.equal(statements.at(-1).sql, 'ROLLBACK');
+  assert.equal(statements.some(({ sql }) => sql === 'COMMIT'), false);
+});
+
+test('the client choice is validated before anything is written', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockCaseTransaction(t);
+  for (const body of [
+    { ...newCase, client_id: clientA, new_client: { client_type: 'individual', full_name_or_org: 'Rami' } },
+    { ...newCase, client_id: 'nope' },
+    { ...newCase, new_client: { client_type: 'individual' } },
+    { ...newCase, new_client: { client_type: 'individual', full_name_or_org: 'Rami', user_id: appUserId } },
+  ]) {
+    assert.equal((await request('POST', '/api/cases', body)).status, 400);
+  }
+  assert.equal(statements.length, 0);
+});
+
+test('a new client can be created and linked from the case file in one transaction', async (t) => {
+  setupRequest(t, 'admin');
+  const statements = mockCaseTransaction(t);
+  const response = await request('POST', `/api/cases/${caseId}/clients`, { new_client: { client_type: 'organization', full_name_or_org: 'Nablus Co.' } });
+  assert.equal(response.status, 201);
+  assert.equal((await response.json()).relationship.client.client_id, clientA);
+  assert.deepEqual(statements.map(({ sql }) => sql.trim().split(/\s+/).slice(0, 2).join(' ')), [
+    'BEGIN', 'SELECT lc.case_id', 'INSERT INTO', 'INSERT INTO', 'COMMIT',
+  ]);
+  assert.match(statements[1].sql, /lc\.office_id = \$2/);
 });

@@ -1,0 +1,16 @@
+# Cloudflare Tunnel: connects this server to Cloudflare without opening any port on the router.
+# Visitors reach https://qadiyati.ps; Cloudflare passes the request through the tunnel to nginx.
+#
+# Replace TUNNEL_ID (twice) with the id printed by `cloudflared tunnel create qadiyati`,
+# then copy this file to /etc/cloudflared/config.yml (see deploy/README.md, step 6).
+
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/TUNNEL_ID.json
+
+ingress:
+  - hostname: qadiyati.ps
+    service: http://127.0.0.1:8080
+  - hostname: www.qadiyati.ps
+    service: http://127.0.0.1:8080
+  # Anything else is refused.
+  - service: http_status:404

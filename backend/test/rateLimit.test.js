@@ -80,3 +80,33 @@ test('rate limiter isolates remote socket addresses', () => {
   assert.equal(runLimiter(middleware, '192.0.2.11').nextCalled, true);
   assert.equal(runLimiter(middleware, '192.0.2.10').status, 429);
 });
+
+test('behind the local reverse proxy, TRUST_PROXY=loopback counts each visitor by X-Real-IP', async () => {
+  const { clientAddressOf } = await import('../src/middleware/rateLimit.js');
+  const viaProxy = { socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-real-ip': '203.0.113.7' } };
+  assert.equal(clientAddressOf(viaProxy, { TRUST_PROXY: 'loopback' }), '203.0.113.7');
+  // Off by default: the header is ignored.
+  assert.equal(clientAddressOf(viaProxy, {}), '127.0.0.1');
+  // A direct (non-local) caller cannot claim another address.
+  const direct = { socket: { remoteAddress: '198.51.100.9' }, headers: { 'x-real-ip': '203.0.113.7' } };
+  assert.equal(clientAddressOf(direct, { TRUST_PROXY: 'loopback' }), '198.51.100.9');
+  // Garbage in the header falls back to the peer.
+  const garbage = { socket: { remoteAddress: '::1' }, headers: { 'x-real-ip': 'not-an-ip' } };
+  assert.equal(clientAddressOf(garbage, { TRUST_PROXY: 'loopback' }), '::1');
+});
+
+test('with TRUST_PROXY=loopback, two visitors behind the proxy have separate limits', () => {
+  const limiter = createRateLimit({ maxRequests: 1, env: { TRUST_PROXY: 'loopback' } });
+  const send = (ip) => {
+    let passed = false;
+    limiter(
+      { socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-real-ip': ip } },
+      { setHeader() {}, status() { return this; }, json() { return this; } },
+      () => { passed = true; }
+    );
+    return passed;
+  };
+  assert.equal(send('203.0.113.1'), true);
+  assert.equal(send('203.0.113.2'), true);
+  assert.equal(send('203.0.113.1'), false);
+});

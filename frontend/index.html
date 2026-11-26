@@ -1,13 +1,43 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f7fa" />
-    <title>Smart Law Firm Management</title>
+    <meta name="description" content="قضيتي — نظام إدارة مكاتب المحاماة" />
+    <meta name="theme-color" content="#061d33" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>قضيتي</title>
+    <script>
+      // Theme and language before the first paint, so the page never flashes the wrong one.
+      ;(function () {
+        var root = document.documentElement
+        var theme = null
+        var lang = null
+        try {
+          theme = localStorage.getItem('qadiyati.theme')
+          lang = localStorage.getItem('qadiyati.lang')
+        } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        root.setAttribute('data-theme', theme)
+        if (lang === 'en') {
+          root.setAttribute('lang', 'en')
+          root.setAttribute('dir', 'ltr')
+        }
+      })()
+    </script>
   </head>
   <body>
+    <!-- Ink roughness for rubber stamps: referenced as filter:url(#ink) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="ink">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="n" />
+        <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -0.9 1.28" result="m" />
+        <feComposite in="SourceGraphic" in2="m" operator="in" />
+      </filter>
+    </svg>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

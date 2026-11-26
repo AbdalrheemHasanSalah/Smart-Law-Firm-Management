@@ -146,6 +146,9 @@ export const EXPECTED_TABLES = [
   'sessions',
   'accounts',
   'verifications',
+  'law_offices',
+  'office_memberships',
+  'office_invitations',
   'lawyer_profiles',
   'clients',
   'courts',
@@ -167,11 +170,15 @@ export const EXPECTED_TABLES = [
   'ai_interactions',
   'ai_interaction_sources',
   'case_status_history',
+  'case_opponents',
+  'support_messages',
 ];
 
 export const EXPECTED_ROLES = ['admin', 'lawyer', 'assistant', 'client'];
 
 const RESETTABLE_TABLES = [
+  'support_messages',
+  'case_opponents',
   'ai_interaction_sources',
   'case_status_history',
   'payments',
@@ -190,8 +197,11 @@ const RESETTABLE_TABLES = [
   'assigned_to',
   'involves',
   'legal_cases',
+  'office_invitations',
   'lawyer_profiles',
   'clients',
+  'office_memberships',
+  'law_offices',
   'accounts',
   'sessions',
   'verifications',
@@ -247,6 +257,21 @@ export const EXPECTED_FOREIGN_KEYS = [
   { table: 'ai_interaction_sources', column: 'reference_id', foreignTable: 'legal_references', foreignColumn: 'reference_id' },
   { table: 'case_status_history', column: 'case_id', foreignTable: 'legal_cases', foreignColumn: 'case_id' },
   { table: 'case_status_history', column: 'user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
+  { table: 'case_opponents', column: 'case_id', foreignTable: 'legal_cases', foreignColumn: 'case_id' },
+  { table: 'case_opponents', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'case_opponents', column: 'created_by_user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
+  { table: 'support_messages', column: 'user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
+  { table: 'support_messages', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'law_offices', column: 'created_by_user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
+  { table: 'office_memberships', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'office_memberships', column: 'user_id', foreignTable: 'app_users', foreignColumn: 'user_id' },
+  { table: 'office_memberships', column: 'role_id', foreignTable: 'roles', foreignColumn: 'role_id' },
+  { table: 'office_invitations', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'sessions', column: 'active_office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'clients', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'legal_cases', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'documents', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
+  { table: 'hearings', column: 'office_id', foreignTable: 'law_offices', foreignColumn: 'office_id' },
 ];
 
 export function getDbConfig() {

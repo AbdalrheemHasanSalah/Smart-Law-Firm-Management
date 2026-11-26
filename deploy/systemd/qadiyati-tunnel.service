@@ -1,0 +1,22 @@
+# Free public link (trycloudflare.com) for Qadiyati, kept running and restarted on failure.
+# The link changes on each start; the current one is in /opt/qadiyati/PUBLIC_URL.
+#
+# Install:  sudo cp quick-tunnel.sh /usr/local/bin/qadiyati-quick-tunnel && sudo chmod 755 /usr/local/bin/qadiyati-quick-tunnel
+#           sudo cp qadiyati-tunnel.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now qadiyati-tunnel
+# Current link: cat /opt/qadiyati/PUBLIC_URL     Logs: sudo journalctl -u qadiyati-tunnel -n 30
+
+[Unit]
+Description=Qadiyati free public link (Cloudflare quick tunnel)
+After=network-online.target nginx.service qadiyati-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root: it rewrites backend/.env and restarts the API when the link changes.
+ExecStart=/usr/local/bin/qadiyati-quick-tunnel
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

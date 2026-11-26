@@ -6,6 +6,7 @@ import {
   updateDocumentMetadata,
   uploadDocument,
 } from '../services/documentService.js';
+import { notifyLater } from '../services/notificationService.js';
 
 export async function listDocumentsController(request, response, next) {
   try {
@@ -23,6 +24,12 @@ export async function uploadDocumentController(request, response, next) {
       request.params.caseId,
       request
     );
+    notifyLater('case.document_added', {
+      officeId: request.user.office_id, actorUserId: request.user.user_id,
+      caseId: document.case_id,
+      accessLevel: document.access_level,
+      clientId: request.headers['x-document-client-id'] ?? null,
+    });
     return response.status(201).json({ document });
   } catch (error) {
     return next(error);

@@ -1,4 +1,7 @@
-import { query } from '../config/db.js';
+import { pool, query } from '../config/db.js';
+import { auditLater, diffValues, pickValues } from './auditService.js';
+import { officeCondition } from './officeScope.js';
+import { auditClientCreated, insertClient, validateNewClient } from './clientService.js';
 
 const CASE_FIELDS = [
   'case_id',
@@ -23,6 +26,7 @@ const CASE_TYPES = new Set([
   'description',
   'court_id',
 ]);
+const AUDITED_CASE_FIELDS = ['case_number', 'title', 'case_type', 'status', 'priority', 'opened_at', 'closed_at', 'description', 'court_id'];
 const CASE_STATUSES = new Set(['open', 'in_progress', 'on_hold', 'closed', 'cancelled']);
 const CASE_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -205,12 +209,14 @@ function assertRole(actor, roles) {
 }
 
 function accessScope(actor, parameters, alias = 'lc') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  if (actor.role === 'admin') return office;
   parameters.push(actor.user_id);
   const userParameter = `$${parameters.length}`;
 
   if (actor.role === 'lawyer' || actor.role === 'assistant') {
     return `
+      ${office}
       AND EXISTS (
         SELECT 1
         FROM assigned_to assignment
@@ -221,6 +227,7 @@ function accessScope(actor, parameters, alias = 'lc') {
   }
   if (actor.role === 'client') {
     return `
+      ${office}
       AND EXISTS (
         SELECT 1
         FROM involves i
@@ -351,11 +358,127 @@ export async function getCaseById(actor, caseId) {
   return publicCase(result.rows[0]);
 }
 
+/**
+ * The client a case is opened for: `client_id` names an existing client of the office,
+ * `new_client` holds the fields of a client created along with it. Either one, or neither.
+ */
+function readClientChoice(body) {
+  validateObject(body);
+  const { client_id: clientId, new_client: newClient, ...rest } = body;
+  if (clientId !== undefined && newClient !== undefined) {
+    invalid('Send either client_id or new_client, not both.');
+  }
+  if (clientId !== undefined && (typeof clientId !== 'string' || !UUID_PATTERN.test(clientId))) {
+    invalid('client_id must be a valid UUID.');
+  }
+  return { rest, clientId, newClient: newClient === undefined ? null : validateNewClient(newClient) };
+}
+
+async function rollbackQuietly(client) {
+  try {
+    await client.query('ROLLBACK');
+    return undefined;
+  } catch (rollbackError) {
+    return rollbackError;
+  }
+}
+
+/**
+ * Runs `work` in one transaction on a dedicated connection: a case and its client are stored
+ * together or not at all. Database errors keep their usual case-service meaning.
+ */
+async function inTransaction(work) {
+  const client = await pool.connect();
+  let releaseError;
+  try {
+    await client.query('BEGIN');
+    const result = await work({
+      query: async (sql, parameters) => {
+        try {
+          return await client.query(sql, parameters);
+        } catch (error) {
+          return mapDatabaseError(error);
+        }
+      },
+      raw: client,
+    });
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    releaseError = await rollbackQuietly(client);
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
+/** The existing client, checked to belong to the actor's office; locked until the case is stored. */
+async function findOfficeClient(db, actor, clientId) {
+  const parameters = [clientId];
+  const officeClause = officeCondition(actor, parameters, 'c');
+  const found = await db.query(
+    `SELECT c.client_id, c.full_name_or_org FROM clients c WHERE c.client_id = $1 AND ${officeClause} FOR SHARE`,
+    parameters
+  );
+  if (!found.rowCount) throw new CaseServiceError(404, 'Client not found.');
+  return found.rows[0];
+}
+
+/**
+ * Opens a case. With a client (an existing one, or a new one created here) the case, the client
+ * and the link between them are stored in one transaction, the client marked as the primary party.
+ */
 export async function createCase(actor, body) {
   assertRole(actor, ['admin']);
-  const fields = validateAndNormalizeFields(body, { create: true });
-  const result = await execute(
-    `
+  const { rest, clientId, newClient } = readClientChoice(body);
+  const fields = validateAndNormalizeFields(rest, { create: true });
+  if (!clientId && !newClient) {
+    const created = publicCase((await execute(INSERT_CASE_SQL, insertCaseParameters(fields, actor))).rows[0]);
+    auditCaseCreated(actor, created);
+    return created;
+  }
+
+  const { created, client, clientIsNew } = await inTransaction(async ({ query: db, raw }) => {
+    const party = newClient
+      ? await insertClient(raw, actor, newClient)
+      : await findOfficeClient({ query: db }, actor, clientId);
+    const caseRow = publicCase((await db(INSERT_CASE_SQL, insertCaseParameters(fields, actor))).rows[0]);
+    await db(
+      `INSERT INTO involves (client_id, case_id, office_id, is_primary) VALUES ($1, $2, $3, TRUE)`,
+      [party.client_id, caseRow.case_id, actor.office_id]
+    );
+    return { created: caseRow, client: party, clientIsNew: Boolean(newClient) };
+  });
+  if (clientIsNew) auditClientCreated(actor, client);
+  auditCaseCreated(actor, created);
+  return { ...created, client: { client_id: client.client_id, full_name_or_org: client.full_name_or_org } };
+}
+
+function auditCaseCreated(actor, created) {
+  auditLater(actor, {
+    action: 'case_created',
+    entityType: 'case',
+    entityId: created.case_id,
+    details: { values: pickValues(created, AUDITED_CASE_FIELDS) },
+  });
+}
+
+function insertCaseParameters(fields, actor) {
+  return [
+    fields.case_number,
+    fields.title,
+    fields.case_type,
+    fields.status ?? 'open',
+    fields.priority ?? 'medium',
+    fields.opened_at ?? null,
+    fields.closed_at ?? null,
+    fields.description ?? null,
+    fields.court_id ?? null,
+    actor.office_id,
+  ];
+}
+
+const INSERT_CASE_SQL = `
       INSERT INTO legal_cases (
         case_number,
         title,
@@ -365,9 +488,10 @@ export async function createCase(actor, body) {
         opened_at,
         closed_at,
         description,
-        court_id
+        court_id,
+        office_id
       )
-      VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()), $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()), $7, $8, $9, $10)
       RETURNING
         case_id,
         case_number,
@@ -379,21 +503,7 @@ export async function createCase(actor, body) {
         closed_at,
         description,
         court_id
-    `,
-    [
-      fields.case_number,
-      fields.title,
-      fields.case_type,
-      fields.status ?? 'open',
-      fields.priority ?? 'medium',
-      fields.opened_at ?? null,
-      fields.closed_at ?? null,
-      fields.description ?? null,
-      fields.court_id ?? null,
-    ]
-  );
-  return publicCase(result.rows[0]);
-}
+    `;
 
 export async function updateCase(actor, caseId, body) {
   assertRole(actor, ['admin', 'lawyer', 'assistant']);
@@ -409,7 +519,9 @@ export async function updateCase(actor, caseId, body) {
     `
       UPDATE legal_cases AS lc
       SET ${assignments.join(', ')}
+      FROM legal_cases previous
       WHERE lc.case_id = $${entries.length + 1}
+      AND previous.case_id = lc.case_id
       ${scope}
       RETURNING
         lc.case_id,
@@ -421,12 +533,21 @@ export async function updateCase(actor, caseId, body) {
         lc.opened_at,
         lc.closed_at,
         lc.description,
-        lc.court_id
+        lc.court_id,
+        row_to_json(previous) AS previous
     `,
     parameters
   );
   if (!result.rowCount) throw new CaseServiceError(404, 'Case not found.');
-  return publicCase(result.rows[0]);
+  const updated = publicCase(result.rows[0]);
+  // `previous` is the row as the statement found it, for the activity log.
+  auditLater(actor, {
+    action: 'case_updated',
+    entityType: 'case',
+    entityId: updated.case_id,
+    details: { subject: updated.title, changes: diffValues(result.rows[0].previous, updated, AUDITED_CASE_FIELDS) },
+  });
+  return updated;
 }
 
 export async function getCaseRelationships(actor, caseId) {
@@ -435,7 +556,7 @@ export async function getCaseRelationships(actor, caseId) {
   const parameters = [caseId];
   const scope = accessScope(actor, parameters);
   const clientDetailScope = actor.role === 'client'
-    ? 'AND c.user_id = $2'
+    ? `AND c.user_id = $${parameters.length}`
     : '';
   const result = await execute(
     `
@@ -481,7 +602,10 @@ export async function getCaseRelationships(actor, caseId) {
             )
             FROM assigned_to assignment
             JOIN app_users u ON u.user_id = assignment.user_id
-            JOIN roles r ON r.role_id = u.role_id
+            JOIN office_memberships membership
+              ON membership.user_id = assignment.user_id
+              AND membership.office_id = assignment.office_id
+            JOIN roles r ON r.role_id = membership.role_id
             WHERE assignment.case_id = ac.case_id
           ),
           '[]'::json
@@ -507,34 +631,129 @@ export async function getCaseRelationships(actor, caseId) {
   };
 }
 
+/**
+ * Adds a client to a case: an existing client of the office (`client_id`), or a new one
+ * (`new_client`) created and linked in one transaction.
+ */
 export async function linkClientToCase(actor, caseId, body) {
   assertRole(actor, ['admin']);
   validateCaseId(caseId);
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     invalid('Request body must be a JSON object.');
   }
-  if (Object.keys(body).some((field) => field !== 'client_id')) {
+  if (Object.keys(body).some((field) => field !== 'client_id' && field !== 'new_client')) {
     invalid('Request contains unsupported fields.');
+  }
+  if (body.new_client !== undefined) {
+    if (body.client_id !== undefined) invalid('Send either client_id or new_client, not both.');
+    const fields = validateNewClient(body.new_client);
+    const { link, client } = await inTransaction(async ({ query: db, raw }) => {
+      const parameters = [caseId];
+      const officeClause = officeCondition(actor, parameters, 'lc');
+      const found = await db(`SELECT lc.case_id FROM legal_cases lc WHERE lc.case_id = $1 AND ${officeClause} FOR SHARE`, parameters);
+      if (!found.rowCount) throw new CaseServiceError(404, 'Case or client not found.');
+      const created = await insertClient(raw, actor, fields);
+      const linked = await db(
+        `INSERT INTO involves (client_id, case_id, office_id) VALUES ($1, $2, $3)
+         RETURNING client_id, case_id, party_role, is_primary`,
+        [created.client_id, caseId, actor.office_id]
+      );
+      return { link: linked.rows[0], client: created };
+    });
+    auditClientCreated(actor, client);
+    return { ...link, client: { client_id: client.client_id, full_name_or_org: client.full_name_or_org } };
   }
   if (typeof body.client_id !== 'string' || !UUID_PATTERN.test(body.client_id)) {
     invalid('client_id must be a valid UUID.');
   }
 
+  const parameters = [body.client_id, caseId];
+  const officeClause = officeCondition(actor, parameters, 'c');
   const result = await execute(
     `
-      INSERT INTO involves (client_id, case_id)
-      SELECT c.client_id, lc.case_id
+      INSERT INTO involves (client_id, case_id, office_id)
+      SELECT c.client_id, lc.case_id, c.office_id
       FROM clients c
-      JOIN legal_cases lc ON lc.case_id = $2
+      JOIN legal_cases lc ON lc.case_id = $2 AND lc.office_id = c.office_id
       WHERE c.client_id = $1
+        AND ${officeClause}
       RETURNING client_id, case_id, party_role, is_primary
     `,
-    [body.client_id, caseId]
+    parameters
   );
   if (!result.rowCount) {
     throw new CaseServiceError(404, 'Case or client not found.');
   }
   return result.rows[0];
+}
+
+/** Raised when removing a lawyer would leave the case with none. */
+function lastLawyer() {
+  const error = new CaseServiceError(409, 'A case must keep at least one assigned lawyer.');
+  error.publicCode = 'LAST_LAWYER';
+  return error;
+}
+
+/**
+ * Takes a staff member off a case. The case always keeps one lawyer: the last one cannot be
+ * removed, and when the lead lawyer leaves, the longest-serving remaining lawyer becomes lead.
+ */
+export async function removeStaffFromCase(actor, caseId, userId) {
+  assertRole(actor, ['admin']);
+  validateCaseId(caseId);
+  if (typeof userId !== 'string' || !UUID_PATTERN.test(userId)) invalid('userId must be a valid UUID.');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Locking the case serializes concurrent removals, so two lawyers cannot both be removed at once.
+    const parameters = [caseId];
+    const officeClause = officeCondition(actor, parameters, 'lc');
+    const caseRow = await client.query(
+      `SELECT lc.case_id, lc.office_id FROM legal_cases lc WHERE lc.case_id = $1 AND ${officeClause} FOR UPDATE`,
+      parameters
+    );
+    if (!caseRow.rowCount) throw new CaseServiceError(404, 'Case not found.');
+    const { office_id: officeId } = caseRow.rows[0];
+
+    const staff = await client.query(
+      `SELECT assignment.user_id, assignment.assignment_role, assignment.is_lead, u.full_name
+         FROM assigned_to assignment
+         JOIN app_users u ON u.user_id = assignment.user_id
+        WHERE assignment.case_id = $1 AND assignment.office_id = $2
+        ORDER BY assignment.assigned_at, assignment.user_id`,
+      [caseId, officeId]
+    );
+    const target = staff.rows.find((row) => row.user_id === userId);
+    if (!target) throw new CaseServiceError(404, 'Assigned staff member not found.');
+    // Lawyers include the lead (assignment role 'lead_lawyer' or flagged is_lead); only assistants are not.
+    const isLawyer = (row) => row.is_lead || row.assignment_role !== 'assistant';
+    const lawyers = staff.rows.filter(isLawyer);
+    if (isLawyer(target) && lawyers.length <= 1) throw lastLawyer();
+
+    await client.query('DELETE FROM assigned_to WHERE case_id = $1 AND user_id = $2 AND office_id = $3', [caseId, userId, officeId]);
+    let newLead = null;
+    if (target.is_lead) {
+      newLead = lawyers.find((row) => row.user_id !== userId) ?? null;
+      if (newLead) {
+        await client.query('UPDATE assigned_to SET is_lead = TRUE WHERE case_id = $1 AND user_id = $2 AND office_id = $3', [caseId, newLead.user_id, officeId]);
+      }
+    }
+    await client.query('COMMIT');
+
+    auditLater(actor, {
+      action: 'case_staff_removed',
+      entityType: 'case',
+      entityId: caseId,
+      details: { values: { full_name: target.full_name, assignment_role: target.assignment_role, ...(newLead ? { new_lead: newLead.full_name } : {}) } },
+    });
+    return { user_id: userId, case_id: caseId, new_lead_user_id: newLead?.user_id ?? null };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function assignStaffToCase(actor, caseId, body) {
@@ -550,15 +769,22 @@ export async function assignStaffToCase(actor, caseId, body) {
     invalid('user_id must be a valid UUID.');
   }
 
+  const parameters = [body.user_id, caseId];
+  const officeClause = officeCondition(actor, parameters, 'lc');
   const result = await execute(
     `
-      INSERT INTO assigned_to (user_id, case_id, assignment_role)
-      SELECT u.user_id, lc.case_id, r.role_name
+      INSERT INTO assigned_to (user_id, case_id, assignment_role, office_id)
+      SELECT u.user_id, lc.case_id, r.role_name, lc.office_id
       FROM app_users u
-      JOIN roles r ON r.role_id = u.role_id
       JOIN legal_cases lc ON lc.case_id = $2
+      JOIN office_memberships membership
+        ON membership.user_id = u.user_id
+        AND membership.office_id = lc.office_id
+        AND membership.status = 'active'
+      JOIN roles r ON r.role_id = membership.role_id
       LEFT JOIN lawyer_profiles lp ON lp.user_id = u.user_id
       WHERE u.user_id = $1
+        AND ${officeClause}
         AND u.status = 'active'
         AND (
           r.role_name = 'assistant'
@@ -569,7 +795,7 @@ export async function assignStaffToCase(actor, caseId, body) {
         )
       RETURNING user_id, case_id, assignment_role, assigned_at, is_lead
     `,
-    [body.user_id, caseId]
+    parameters
   );
   if (!result.rowCount) {
     throw new CaseServiceError(404, 'Case or eligible staff member not found.');

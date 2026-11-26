@@ -1,0 +1,345 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/markazi-text/index.css';
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+
+/*
+ * قضيتي — "ملف القضية"
+ * The whole product is a lawyer's desk: a navy blotter, card folders, paper, rubber stamps
+ * and paper clips. Colours are the brand palette only:
+ *   #D90B1A, #8F101B, #061D33, #093552, #68899C, #CED9D8, #F6F5EE
+ */
+@theme {
+  /* the desk: ink navy */
+  --color-desk: #061d33;
+  --color-desk-deep: #041424;
+  --color-desk-light: #093552;
+  /* folders: mist card stock with a slate edge */
+  --color-manila: #ced9d8;
+  --color-manila-deep: #68899c;
+  --color-manila-light: #e3eae9;
+  /* paper */
+  --color-paper: #f6f5ee;
+  --color-paper-shade: #eceee8;
+  --color-rule: #ced9d8;
+  --color-margin: #e9a3a8;
+  /* ink */
+  --color-ink: #061d33;
+  --color-ink-soft: #46607a;
+  --color-ink-faint: #5d7d90;
+  /* stamp pads: signal red, deep blue, slate */
+  --color-stamp: #d90b1a;
+  --color-stamp-deep: #8f101b;
+  --color-stamp-blue: #093552;
+  --color-stamp-green: #4d7186;
+  /* highlights and notes, all tints of the palette */
+  --color-marker: #ced9d8;
+  --color-note: #e3eae9;
+  --color-note-blue: #d5e1e8;
+  --color-note-pink: #f5dadb;
+
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-doc: 'Markazi Text Variable', 'IBM Plex Sans Arabic', serif;
+
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --shadow-paper: 0 1px 1px rgb(0 0 0 / 0.08), 0 8px 20px -6px rgb(0 0 0 / 0.35);
+  --shadow-lifted: 0 2px 2px rgb(0 0 0 / 0.1), 0 26px 40px -14px rgb(0 0 0 / 0.55);
+}
+
+/*
+ * Dark theme: <html data-theme="dark"> (set before the first paint by index.html, from the
+ * viewer's choice or their system setting). The same palette, read at night: the paper turns to
+ * deep navy and the ink to pale mist. Light stays exactly as above.
+ *
+ * "paper" itself stays light, because text-paper is the light writing on navy, red and slate
+ * surfaces everywhere; only the surfaces that ARE paper (bg-paper, bg-paper-shade, .paper, white
+ * cards) turn dark below.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-ink: #e6edf3;
+  --color-ink-soft: #b0c1cf;
+  --color-ink-faint: #8ea4b5;
+  --color-rule: #2a3e52;
+  --color-margin: #7a2a33;
+  --color-manila: #1d3347;
+  --color-manila-light: #18293a;
+  --color-manila-deep: #7d9db0;
+  --color-stamp: #ef3341;
+  --color-stamp-deep: #b3202c;
+  --color-stamp-blue: #7fb3dc;
+  --color-stamp-green: #8fb6ca;
+  --color-marker: #24405a;
+  --color-note: #172a3c;
+  --color-note-blue: #1b3349;
+  --color-note-pink: #3b1f27;
+  /* bg-white cards become the raised dark surface */
+  --color-white: #13263a;
+  --color-surface: #0f1e2d;
+  --color-surface-shade: #142638;
+}
+/*
+ * Scroll bars: a slim slate pill on a clear track, no arrow buttons, darker on hover and stamp red
+ * while dragged. On the navy desk (side bar, dark surfaces) the pill is a pale wash instead.
+ */
+:root {
+  --scroll-thumb: rgb(104 137 156 / 0.45);
+  --scroll-thumb-hover: rgb(104 137 156 / 0.8);
+}
+:root[data-theme='dark'],
+.desk {
+  --scroll-thumb: rgb(206 217 216 / 0.2);
+  --scroll-thumb-hover: rgb(206 217 216 / 0.4);
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 2.5px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--color-stamp);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+/* Firefox has no pseudo-elements for scroll bars; it takes the colours and a thin width. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) transparent;
+  }
+}
+
+:root[data-theme='dark'] .bg-paper,
+:root[data-theme='dark'] .paper {
+  background-color: var(--color-surface);
+}
+:root[data-theme='dark'] .paper {
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.4), 0 10px 26px -8px rgb(0 0 0 / 0.7);
+}
+:root[data-theme='dark'] .bg-paper-shade,
+:root[data-theme='dark'] .hover\:bg-paper-shade:hover {
+  background-color: var(--color-surface-shade);
+}
+:root[data-theme='dark'] .hover\:bg-paper:hover {
+  background-color: #1a3047;
+}
+:root[data-theme='dark'] .bg-paper-shade\/60 {
+  background-color: rgb(20 38 56 / 0.6);
+}
+:root[data-theme='dark'] .bg-paper\/90 {
+  background-color: rgb(15 30 45 / 0.9);
+}
+:root[data-theme='dark'] .bg-paper\/60,
+:root[data-theme='dark'] .bg-paper\/50,
+:root[data-theme='dark'] .bg-paper\/45 {
+  background-color: rgb(15 30 45 / 0.6);
+}
+:root[data-theme='dark'] .manila {
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%);
+  box-shadow:
+    inset 0 0 0 1px rgb(125 157 176 / 0.35),
+    0 1px 1px rgb(0 0 0 / 0.4),
+    0 10px 26px -8px rgb(0 0 0 / 0.7);
+}
+/* Solid ink, blue and slate buttons keep a dark face so their light writing stays legible. */
+:root[data-theme='dark'] .bg-ink {
+  background-color: #2b4a66;
+}
+:root[data-theme='dark'] .hover\:bg-ink\/85:hover {
+  background-color: #35587a;
+}
+:root[data-theme='dark'] .bg-stamp-blue {
+  background-color: #1c5a86;
+}
+:root[data-theme='dark'] .bg-stamp-green {
+  background-color: #3f6478;
+}
+:root[data-theme='dark'] .bg-manila-deep {
+  background-color: #4f6f83;
+}
+:root[data-theme='dark'] ::selection {
+  color: #fff;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background: var(--color-desk-deep);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-doc);
+    font-weight: 700;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-stamp-blue);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-stamp);
+    color: var(--color-paper);
+  }
+}
+
+/* The desk: green blotter with a soft lamp pool and a fine leather grain. */
+@utility desk {
+  background-color: var(--color-desk);
+  background-image:
+    radial-gradient(120% 80% at 50% -10%, rgb(255 255 255 / 0.1), transparent 60%),
+    radial-gradient(90% 70% at 50% 120%, rgb(0 0 0 / 0.45), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@utility paper {
+  background-color: var(--color-paper);
+  box-shadow: var(--shadow-paper);
+  border-radius: 3px;
+}
+
+/* Ruled lines of a legal pad, with the red margin on the start side. */
+@utility ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2.15rem,
+    var(--color-rule) 2.15rem,
+    var(--color-rule) calc(2.15rem + 1px)
+  );
+}
+
+/* Folder card stock: mist, with a lighter top edge and a slate outline. */
+@utility manila {
+  background-color: var(--color-manila);
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 30%);
+  box-shadow:
+    inset 0 0 0 1px rgb(104 137 156 / 0.45),
+    var(--shadow-paper);
+}
+
+/* Rubber stamp: a clean double frame in the pad's colour. */
+@utility stamp {
+  display: inline-block;
+  font-family: var(--font-doc);
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.1em 0.65em 0.15em;
+  border: 3px double currentColor;
+  border-radius: 0.3em;
+  white-space: nowrap;
+}
+
+/* Underline in signal red, drawn across when data-on is set (see <Marker>). */
+@utility marker {
+  background-image: linear-gradient(var(--color-stamp), var(--color-stamp));
+  background-repeat: no-repeat;
+  background-size: 0% 0.14em;
+  background-position: right 96%;
+  transition: background-size 900ms var(--ease-smooth) 200ms;
+  padding-bottom: 0.08em;
+  &[data-on='true'] {
+    background-size: 100% 0.14em;
+  }
+  /* drawn from the start of the line, whichever side that is */
+  &:where([dir='ltr'], [dir='ltr'] *) {
+    background-position: left 96%;
+  }
+}
+
+/* A folder tab: trapezoid cut. */
+@utility tab-cut {
+  clip-path: polygon(10% 0, 90% 0, 100% 100%, 0 100%);
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes ticker {
+  to {
+    transform: translateX(50%);
+  }
+}
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-1.4deg);
+  }
+  50% {
+    transform: rotate(1.4deg);
+  }
+}
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-7px);
+  }
+  40%,
+  80% {
+    transform: translateX(7px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Printing a statement of account: only the sheet itself, on plain paper. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body {
+    background: #fff !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+  .print-sheet {
+    position: absolute;
+    inset: 0 0 auto 0;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

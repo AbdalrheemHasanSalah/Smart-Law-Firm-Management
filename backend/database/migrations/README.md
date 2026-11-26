@@ -1,5 +1,9 @@
 # Database migrations
 
+> **backend-development note:** `0001_multi_tenant_offices.sql` was added here for review (see
+> `../../CHANGE_REPORT.md`). It has not been applied to any database. The rules below still apply
+> before it may run.
+
 `schema.sql` is the bootstrap definition for a fresh installation.
 `initialize.js` is a separate initializer and is not a migration runner.
 Versioned upgrades are applied only by the explicit `migrate.js` command.

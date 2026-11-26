@@ -1,9 +1,14 @@
 import { query } from '../config/db.js';
+import { auditLater, diffValues, pickValues } from './auditService.js';
+import { officeCondition } from './officeScope.js';
+
+const AUDITED_TASK_FIELDS = ['title', 'description', 'status', 'priority', 'due_at', 'completed_at', 'case_id', 'assigned_to_name'];
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TASK_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
 const TASK_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
-const LIST_FIELDS = new Set(['page', 'pageSize', 'status', 'priority', 'caseId', 'search']);
+const LIST_FIELDS = new Set(['page', 'pageSize', 'status', 'priority', 'caseId', 'search', 'kind']);
+const TASK_KINDS = new Set(['assigned', 'private']);
 const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 20;
 const TASK_FIELDS = [
@@ -17,8 +22,10 @@ const TASK_FIELDS = [
   'case_id',
   'assigned_to_name',
   'created_by_name',
+  'is_private',
 ];
 const BODY_FIELDS = new Set(['title', 'description', 'status', 'priority', 'due_at']);
+const PRIVATE_FIELDS = new Set(['title', 'description', 'priority', 'due_at']);
 const CREATE_FIELDS = new Set([
   ...BODY_FIELDS,
   'assigned_to_user_id',
@@ -101,7 +108,12 @@ function parseListOptions(parameters = {}) {
     search = parameters.search.trim();
     if (search.length > 100) invalid('search must contain at most 100 characters.');
   }
-  return { page, pageSize, offset, status, priority, caseId, search };
+  let kind;
+  if (parameters.kind !== undefined) {
+    if (!TASK_KINDS.has(parameters.kind)) invalid('kind must be assigned or private.');
+    kind = parameters.kind;
+  }
+  return { page, pageSize, offset, status, priority, caseId, search, kind };
 }
 
 function validateTimestamp(value, field) {
@@ -187,10 +199,13 @@ function validateBody(body, allowedFields, { create = false } = {}) {
 }
 
 function taskAccessScope(actor, parameters, alias = 't') {
-  if (actor.role === 'admin') return '';
+  const office = `AND ${officeCondition(actor, parameters, alias)}`;
   parameters.push(actor.user_id);
+  // A private task is seen by its writer only, the office administrator included.
+  if (actor.role === 'admin') return `${office} AND (NOT ${alias}.is_private OR ${alias}.created_by_user_id = $${parameters.length})`;
   const userParameter = `$${parameters.length}`;
   return `
+    ${office}
     AND ${alias}.assigned_to_user_id = ${userParameter}
     AND (
       ${alias}.case_id IS NULL
@@ -237,7 +252,8 @@ const TASK_SELECT = `
     t.completed_at,
     t.case_id,
     assignee.full_name AS assigned_to_name,
-    creator.full_name AS created_by_name
+    creator.full_name AS created_by_name,
+    t.is_private
   FROM tasks t
   JOIN app_users assignee ON assignee.user_id = t.assigned_to_user_id
   JOIN app_users creator ON creator.user_id = t.created_by_user_id
@@ -245,7 +261,7 @@ const TASK_SELECT = `
 
 export async function listTasks(actor, queryParameters) {
   assertActor(actor, ['admin', 'lawyer', 'assistant']);
-  const { page, pageSize, offset, status, priority, caseId, search } = parseListOptions(queryParameters);
+  const { page, pageSize, offset, status, priority, caseId, search, kind } = parseListOptions(queryParameters);
   const parameters = [];
   const scope = taskAccessScope(actor, parameters);
   let filters = '';
@@ -261,6 +277,7 @@ export async function listTasks(actor, queryParameters) {
     parameters.push(caseId);
     filters += ` AND t.case_id = $${parameters.length}`;
   }
+  if (kind) filters += kind === 'private' ? ' AND t.is_private' : ' AND NOT t.is_private';
   if (search) {
     parameters.push(`%${search.replace(/[\\%_]/g, '\\$&')}%`);
     const searchParameter = `$${parameters.length}`;
@@ -324,6 +341,7 @@ export async function createTask(actor, body) {
     fields.case_id ?? null,
     actor.user_id,
   ];
+  officeCondition(actor, parameters, 'lc');
   const result = await execute(
     `
       INSERT INTO tasks (
@@ -335,22 +353,28 @@ export async function createTask(actor, body) {
         completed_at,
         case_id,
         assigned_to_user_id,
-        created_by_user_id
+        created_by_user_id,
+        office_id
       )
       SELECT
-        $4,
         $5,
         $6,
         $7,
         $8,
         $9,
+        $10,
         lc.case_id,
         assignee.user_id,
-        creator.user_id
+        creator.user_id,
+        membership.office_id
       FROM app_users assignee
-      JOIN roles assignee_role ON assignee_role.role_id = assignee.role_id
+      JOIN office_memberships membership
+        ON membership.user_id = assignee.user_id
+        AND membership.office_id = $4
+        AND membership.status = 'active'
+      JOIN roles assignee_role ON assignee_role.role_id = membership.role_id
       JOIN app_users creator ON creator.user_id = $3
-      LEFT JOIN legal_cases lc ON lc.case_id = $2
+      LEFT JOIN legal_cases lc ON lc.case_id = $2 AND lc.office_id = membership.office_id
       WHERE assignee.user_id = $1
         AND assignee.status = 'active'
         AND assignee_role.role_name IN ('lawyer', 'assistant')
@@ -379,7 +403,14 @@ export async function createTask(actor, body) {
   if (!result.rowCount) {
     throw new TaskServiceError(404, 'Eligible assignee or case not found.');
   }
-  return getTaskById(actor, result.rows[0].task_id);
+  const created = await getTaskById(actor, result.rows[0].task_id);
+  auditLater(actor, {
+    action: 'task_created',
+    entityType: 'task',
+    entityId: created.task_id,
+    details: { values: pickValues(created, AUDITED_TASK_FIELDS) },
+  });
+  return created;
 }
 
 export async function updateTask(actor, taskId, body) {
@@ -397,12 +428,59 @@ export async function updateTask(actor, taskId, body) {
     `
       UPDATE tasks AS t
       SET ${assignments.join(', ')}
+      FROM tasks previous
       WHERE t.task_id = ${taskIdParameter}
+        AND previous.task_id = t.task_id
         ${scope}
-      RETURNING t.task_id
+      RETURNING t.task_id, row_to_json(previous) AS previous
     `,
     parameters
   );
   if (!result.rowCount) throw new TaskServiceError(404, 'Task not found.');
+  const updated = await getTaskById(actor, result.rows[0].task_id);
+  // `previous` is the row as the statement found it, for the activity log. Private tasks stay out of it.
+  if (!updated.is_private) auditLater(actor, {
+    action: 'task_updated',
+    entityType: 'task',
+    entityId: updated.task_id,
+    details: { subject: updated.title, changes: diffValues(result.rows[0].previous, updated, AUDITED_TASK_FIELDS.filter((field) => field !== 'assigned_to_name')) },
+  });
+  return updated;
+}
+
+/** A staff member writes a task for themselves: private, unassigned to anyone else and tied to no case. */
+export async function createPrivateTask(actor, body) {
+  assertActor(actor, ['admin', 'lawyer', 'assistant']);
+  const fields = validateBody(body, PRIVATE_FIELDS);
+  if (!fields.title) invalid('title is required.');
+  const parameters = [actor.user_id];
+  const officeClause = officeCondition(actor, parameters, 'membership');
+  const result = await execute(
+    `
+      INSERT INTO tasks (title, description, priority, due_at, assigned_to_user_id, created_by_user_id, office_id, is_private)
+      SELECT $${parameters.length + 1}::text, $${parameters.length + 2}::text, $${parameters.length + 3}::text, $${parameters.length + 4}::timestamptz,
+             membership.user_id, membership.user_id, membership.office_id, TRUE
+      FROM office_memberships membership
+      WHERE membership.user_id = $1
+        AND membership.status = 'active'
+        AND ${officeClause}
+      RETURNING task_id
+    `,
+    [...parameters, fields.title, fields.description ?? null, fields.priority ?? 'medium', fields.due_at ?? null]
+  );
+  if (!result.rowCount) throw new TaskServiceError(403, 'You do not have permission to access this resource.');
   return getTaskById(actor, result.rows[0].task_id);
+}
+
+/** Only private tasks are deleted, and only by their writer; assigned tasks are cancelled instead. */
+export async function deletePrivateTask(actor, taskId) {
+  assertActor(actor, ['admin', 'lawyer', 'assistant']);
+  validateUuid(taskId, 'taskId');
+  const parameters = [taskId, actor.user_id];
+  const officeClause = officeCondition(actor, parameters, 't');
+  const result = await execute(
+    `DELETE FROM tasks t WHERE t.task_id = $1 AND t.is_private AND t.created_by_user_id = $2 AND ${officeClause} RETURNING t.task_id`,
+    parameters
+  );
+  if (!result.rowCount) throw new TaskServiceError(404, 'Task not found.');
 }

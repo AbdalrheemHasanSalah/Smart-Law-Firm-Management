@@ -1,10 +1,13 @@
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { kyselyAdapter } from '@better-auth/kysely-adapter';
 import { toNodeHandler } from 'better-auth/node';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 
 import { pool } from './db.js';
 import { getSecurityConfig } from './security.js';
+import { passwordResetEmail, sendMail } from '../services/mailService.js';
+import { portalContext, portalsFor } from '../services/portalAccess.js';
 
 const secret = process.env.BETTER_AUTH_SECRET || process.env.AUTH_SECRET;
 
@@ -15,6 +18,30 @@ if (!secret || secret.length < 32) {
 const isUnitTest = process.env.NODE_ENV === 'test'
   && process.env.LAW_FIRM_UNIT_TEST_MODE === 'true';
 const securityConfig = getSecurityConfig();
+
+const RESET_TOKEN_TTL_SECONDS = 60 * 60;
+
+/**
+ * The link in the reset email opens the site's own reset page with the token, on the first
+ * trusted frontend origin (the site's configured address, never anything from the request).
+ * Better Auth's default link goes through GET /api/auth/reset-password/:token first, which a
+ * click from a webmail page reaches as a cross-site request, and origin protection rightly
+ * refuses those. The page then posts the token and new password from the site itself.
+ */
+export function resetPageLink(token, origins = securityConfig.trustedOrigins) {
+  const origin = origins?.[0];
+  if (!origin || typeof token !== 'string' || !token) return null;
+  return `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Sent through mailService (SMTP or Resend). Without either the link is written to the console
+ * outside production. The request answers the same either way, so it never reveals whether the
+ * address has an account.
+ */
+async function sendResetPassword({ user, url, token }) {
+  await sendMail({ to: user.email, ...passwordResetEmail({ url: resetPageLink(token) ?? url }) });
+}
 
 const db = isUnitTest
   ? null
@@ -136,8 +163,34 @@ function createAtomicAuthAdapter(rootDb) {
                   WHERE auth_user_id = ${sessionUserId}
                   FOR UPDATE`.compile(db)
             );
+            // Runs on the session's own transaction (after the password check), so a stable
+            // code can be returned without revealing account status to unauthenticated callers.
             if (account.rows[0]?.status !== 'active') {
-              throw new Error('Better Auth cannot create a session for an inactive account.');
+              throw new APIError('FORBIDDEN', {
+                code: 'ACCOUNT_INACTIVE',
+                message: 'This account is inactive or suspended.',
+              });
+            }
+
+            // The sign-in page of one audience refuses accounts of another, still after the
+            // password check and before any session exists (see services/portalAccess.js).
+            const requested = portalContext.getStore()?.portal;
+            if (requested) {
+              const memberships = await db.executeQuery(
+                sql`SELECT u.is_platform_admin, r.role_name AS role, membership.is_owner
+                    FROM app_users u
+                    LEFT JOIN office_memberships membership ON membership.user_id = u.user_id
+                    LEFT JOIN roles r ON r.role_id = membership.role_id
+                    WHERE u.auth_user_id = ${sessionUserId}`.compile(db)
+              );
+              const portals = portalsFor(memberships.rows);
+              if (!portals.includes(requested)) {
+                throw new APIError('FORBIDDEN', {
+                  code: 'WRONG_PORTAL',
+                  message: 'This account does not sign in from this page.',
+                  portals,
+                });
+              }
             }
           }
 
@@ -190,6 +243,9 @@ export const auth = isUnitTest
     minPasswordLength: 8,
     autoSignIn: true,
     requireEmailVerification: false,
+    sendResetPassword,
+    resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_SECONDS,
+    revokeSessionsOnPasswordReset: true,
   },
   user: {
     modelName: 'auth_users',

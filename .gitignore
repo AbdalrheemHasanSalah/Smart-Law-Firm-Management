@@ -17,6 +17,7 @@ traces/
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/private-documents/
+.claude/settings.local.json
 
 # Local secrets and database artifacts
 *.postman_environment.json

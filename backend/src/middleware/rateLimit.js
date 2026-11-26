@@ -1,12 +1,30 @@
+import { isIP } from 'node:net';
+
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_REQUESTS = 60;
 const MAX_TRACKED_CLIENTS = 10000;
 const OVERFLOW_CLIENT = Symbol('overflow-client');
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/**
+ * The address a request is counted against. By default the TCP peer: caller-supplied headers are
+ * never trusted. Behind a reverse proxy on the same machine (nginx in front of the API), every
+ * request arrives from 127.0.0.1, so with TRUST_PROXY=loopback the X-Real-IP header is used, and
+ * only when the request really came from the local proxy, which must overwrite that header.
+ */
+export function clientAddressOf(request, env = process.env) {
+  const peer = request.socket?.remoteAddress || 'unknown';
+  if (env.TRUST_PROXY !== 'loopback' || !LOOPBACK.has(peer)) return peer;
+  const forwarded = request.headers?.['x-real-ip'];
+  return typeof forwarded === 'string' && isIP(forwarded.trim()) ? forwarded.trim() : peer;
+}
+
 export function createRateLimit({
   windowMs = DEFAULT_WINDOW_MS,
   maxRequests = DEFAULT_MAX_REQUESTS,
   now = Date.now,
+  env = process.env,
 } = {}) {
   if (!Number.isSafeInteger(windowMs) || windowMs < 1) {
     throw new TypeError('windowMs must be a positive safe integer.');
@@ -19,7 +37,7 @@ export function createRateLimit({
 
   return (request, response, next) => {
     const currentTime = now();
-    const clientAddress = request.socket?.remoteAddress || 'unknown';
+    const clientAddress = clientAddressOf(request, env);
     let clientKey = clientAddress;
     let entry = clients.get(clientKey);
 

@@ -9,6 +9,7 @@ const { default: app } = await import('../src/app.js');
 
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const taskId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const caseId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
 const assigneeId = 'd5a39bb4-f7b6-43a0-bfca-2b16678cc514';
@@ -24,6 +25,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 const taskRecord = {
@@ -118,8 +120,10 @@ test('admin lists tasks with status filters and bounded pagination', async (t) =
   assert.equal(body.pagination.pageSize, 50);
   assert.equal(body.tasks[0].task_id, taskId);
   assert.equal('created_by_user_id' in body.tasks[0], false);
-  assert.deepEqual(calls[1].parameters, ['pending']);
-  assert.deepEqual(calls[2].parameters, ['pending', 50, 50]);
+  // The administrator's own id hides other members' private tasks.
+  assert.deepEqual(calls[1].parameters, [officeId, appUserId, 'pending']);
+  assert.deepEqual(calls[2].parameters, [officeId, appUserId, 'pending', 50, 50]);
+  assert.match(calls[1].sql, /NOT t\.is_private OR t\.created_by_user_id = \$2/);
   assert.equal(calls.length, 3);
 });
 
@@ -170,10 +174,12 @@ test('only admins can create tasks, and admin creation validates eligible assign
       assert.match(sql, /assignee_role\.role_name IN \('lawyer', 'assistant'\)/);
       assert.match(sql, /assignee\.status = 'active'/);
       assert.match(sql, /FROM assigned_to assignment/);
+      assert.match(sql, /membership\.office_id = \$4/);
       assert.deepEqual(parameters, [
         assigneeId,
         caseId,
         appUserId,
+        officeId,
         'File motion',
         'Prepare the motion.',
         'pending',
@@ -328,4 +334,52 @@ test('missing task and database errors return safe responses', async (t) => {
     assert.doesNotMatch(JSON.stringify(await response.json()), /private database detail/);
     assert.equal(calls.length, 2);
   });
+});
+
+test('any staff member writes a private task for themselves alone, tied to no case', async (t) => {
+  for (const role of ['lawyer', 'assistant', 'admin']) {
+    await t.test(role, async (subtest) => {
+      const calls = setupRequest(subtest, role, async (sql) => {
+        if (sql.includes('INSERT INTO tasks')) return { rowCount: 1, rows: [{ task_id: taskId }] };
+        return { rowCount: 1, rows: [{ ...taskRecord, is_private: true }] };
+      });
+      const response = await request('POST', '/api/tasks/private', { title: 'Call the court registry', priority: 'high' });
+      assert.equal(response.status, 201);
+      assert.equal((await response.json()).task.is_private, true);
+      const insert = calls.find(({ sql }) => sql.includes('INSERT INTO tasks'));
+      assert.match(insert.sql, /membership.user_id, membership.user_id, membership.office_id, TRUE/);
+      assert.deepEqual(insert.parameters.slice(0, 2), [appUserId, officeId]);
+      assert.equal(insert.sql.includes('case_id'), false);
+    });
+  }
+});
+
+test('a private task cannot name an assignee or a case, and needs a title', async (t) => {
+  const calls = setupRequest(t, 'lawyer');
+  assert.equal((await request('POST', '/api/tasks/private', { title: 'x', assigned_to_user_id: assigneeId })).status, 400);
+  assert.equal((await request('POST', '/api/tasks/private', { title: 'x', case_id: caseId })).status, 400);
+  assert.equal((await request('POST', '/api/tasks/private', { priority: 'high' })).status, 400);
+  assert.equal(calls.some(({ sql }) => sql.includes('INSERT INTO tasks')), false);
+});
+
+test('task lists split assigned and private tasks', async (t) => {
+  const calls = setupRequest(t, 'lawyer', async (sql) => {
+    if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ total: 0 }] };
+    return { rowCount: 0, rows: [] };
+  });
+  assert.equal((await request('GET', '/api/tasks?kind=private')).status, 200);
+  assert.match(calls.at(-1).sql, /AND t.is_private/);
+  assert.equal((await request('GET', '/api/tasks?kind=assigned')).status, 200);
+  assert.match(calls.at(-1).sql, /AND NOT t.is_private/);
+  assert.equal((await request('GET', '/api/tasks?kind=other')).status, 400);
+});
+
+test('only the writer deletes a private task, and assigned tasks are never deleted', async (t) => {
+  const calls = setupRequest(t, 'lawyer', async (sql, parameters) => {
+    assert.match(sql, /t\.is_private AND t\.created_by_user_id = \$2/);
+    assert.deepEqual(parameters, [taskId, appUserId, officeId]);
+    return { rowCount: 0, rows: [] };
+  });
+  assert.equal((await request('DELETE', `/api/tasks/${taskId}`)).status, 404);
+  assert.equal(calls.length, 2);
 });

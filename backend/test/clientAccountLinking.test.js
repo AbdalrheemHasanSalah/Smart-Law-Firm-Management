@@ -7,9 +7,11 @@ dotenv.config = () => ({ parsed: {} });
 const { pool } = await import('../src/config/db.js');
 const { ClientServiceError, linkClientAccount } = await import('../src/services/clientService.js');
 
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const actor = {
   user_id: '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a',
   role: 'admin',
+  office_id: officeId,
 };
 const clientId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const userId = '8bf121a3-7cf3-4c44-8a56-65a05dd1c9b1';
@@ -29,7 +31,7 @@ function setupLinkService(t, queryOverride) {
         return { rowCount: null, rows: [] };
       }
       if (sql.includes('FROM clients WHERE client_id')) {
-        return { rowCount: 1, rows: [{ client_id: clientId, user_id: null }] };
+        return { rowCount: 1, rows: [{ client_id: clientId, user_id: null, office_id: officeId }] };
       }
       if (sql.includes('FROM app_users u')) {
         return { rowCount: 1, rows: [{ user_id: userId }] };
@@ -115,12 +117,13 @@ test('linking checks eligible records, updates, audits, and commits in one trans
     'INSERT INTO',
     'COMMIT',
   ]);
-  assert.deepEqual(state.queries[1].parameters, [clientId]);
+  assert.deepEqual(state.queries[1].parameters, [clientId, officeId]);
   assert.match(state.queries[2].sql, /r\.role_name = 'client'/);
   assert.match(state.queries[2].sql, /u\.status = 'active'/);
   assert.match(state.queries[2].sql, /u\.auth_user_id IS NOT NULL/);
-  assert.deepEqual(state.queries[2].parameters, [userId]);
-  assert.deepEqual(state.queries[3].parameters, [userId, clientId]);
+  assert.match(state.queries[2].sql, /membership\.office_id = \$2/);
+  assert.deepEqual(state.queries[2].parameters, [userId, officeId]);
+  assert.deepEqual(state.queries[3].parameters, [userId, clientId, officeId]);
   assert.deepEqual(state.queries[4].parameters, [clientId, userId]);
   assert.deepEqual(state.queries[5].parameters, [
     'client_account_linked',
@@ -128,6 +131,7 @@ test('linking checks eligible records, updates, audits, and commits in one trans
     clientId,
     JSON.stringify({ linked_user_id: userId }),
     actor.user_id,
+    officeId,
   ]);
   assert.deepEqual(state.queries[6].parameters, []);
   assert.equal(state.connectCount, 1);

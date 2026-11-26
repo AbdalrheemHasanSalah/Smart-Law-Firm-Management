@@ -18,6 +18,7 @@ const { streamContractDownload } = await import('../src/controllers/contractCont
 
 const authUserId = 'auth-user-id';
 const appUserId = '3ca4b66f-712b-4b4f-8e81-5b719c7dc58a';
+const officeId = '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d';
 const clientId = 'd5a39bb4-f7b6-43a0-bfca-2b16678cc514';
 const caseId = '1cdd115e-0279-48b4-a795-1be1d5a50d0b';
 const contractId = 'e4663540-663f-4d4d-b8f2-bfbc6a414d64';
@@ -34,6 +35,7 @@ const mappedUser = {
   email_verified: true,
   status: 'active',
   role_id: 'role-id',
+  office_id: '9b1f6c2e-4d3a-4f5b-8c7d-0e1f2a3b4c5d',
   role: 'admin',
 };
 
@@ -142,7 +144,7 @@ test('admin can list contracts with bounded filters and safe fields', async (t) 
   setupRequest(t, 'admin', async (sql, parameters) => {
     assert.doesNotMatch(sql, /SELECT \*/i);
     if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ total: 1 }] };
-    assert.deepEqual(parameters, [clientId, caseId, 'draft', '%\\%\\_%', 50, 50]);
+    assert.deepEqual(parameters, [officeId, clientId, caseId, 'draft', '%\\%\\_%', 50, 50]);
     return { rowCount: 1, rows: [{ ...contractRecord(), storage_key: `${contractId}.pdf`, user_id: appUserId }] };
   });
   const response = await request(
@@ -221,7 +223,8 @@ test('contract updates reject ownership fields and invalid statuses', async (t) 
 test('contract upload verifies client/case scope before writing a file', async (t) => {
   setupRequest(t, 'lawyer', async (sql, parameters) => {
     if (sql.includes('FROM clients c')) {
-      assert.deepEqual(parameters, [clientId, caseId, appUserId]);
+      assert.match(sql, /c\.office_id = \$3/);
+      assert.deepEqual(parameters, [clientId, caseId, officeId, appUserId]);
       return { rowCount: 0, rows: [] };
     }
     return { rowCount: 0, rows: [] };
@@ -239,8 +242,8 @@ test('admin validation query receives exactly its SQL parameters', async (t) => 
   setupRequest(t, 'admin', async (sql, parameters) => {
     if (sql.includes('FROM clients c')) {
       calls.push({ sql, parameters });
-      assert.doesNotMatch(sql, /\$3/);
-      assert.deepEqual(parameters, [clientId, null]);
+      assert.doesNotMatch(sql, /\$4/);
+      assert.deepEqual(parameters, [clientId, null, officeId]);
       return { rowCount: 1, rows: [{ client_id: clientId, case_id: null }] };
     }
     if (sql.includes('INSERT INTO contracts')) {
