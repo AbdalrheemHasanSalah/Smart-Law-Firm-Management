@@ -69,7 +69,7 @@ test("a lawyer's calendar holds only their cases' hearings, their appointments a
       const calls = setup(subtest, role, async () => ({ rows: [] }));
       const response = await request('GET', '/api/calendar?from=2026-11-01&to=2026-11-30');
       assert.equal(response.status, 200);
-      assert.equal(calls.length, 3);
+      assert.equal(calls.length, 5);
       assert.equal(calls.some(({ sql }) => sql.includes('FROM invoices')), false);
       for (const { parameters } of calls) assert.deepEqual(parameters.slice(2), [officeId, appUserId]);
       const sqlOf = (table) => calls.find(({ sql }) => sql.includes(`FROM ${table}`)).sql;
@@ -77,6 +77,8 @@ test("a lawyer's calendar holds only their cases' hearings, their appointments a
       assert.match(sqlOf('appointments a'), /a\.user_id = \$4 OR/);
       assert.match(sqlOf('tasks t'), /t\.assigned_to_user_id = \$4/);
       assert.match(sqlOf('tasks t'), /NOT t\.is_private OR t\.created_by_user_id = \$4/);
+      assert.match(sqlOf('court_notices n'), /mine\.case_id = n\.case_id AND mine\.user_id = \$4/);
+      assert.match(sqlOf('leave_requests l'), /l\.user_id = \$4/);
     });
   }
 });
@@ -85,6 +87,7 @@ test('the calendar merges hearings, appointments, task deadlines and claims due,
   const calls = setup(t, 'admin', async (sql) => {
     if (sql.includes('FROM hearings h')) return { rows: [{ id: hearingId, at: '2026-11-10T09:00:00.000Z', hearing_type: 'مرافعة', status: 'scheduled', case_id: caseId, case_number: '2026/1' }] };
     if (sql.includes('FROM appointments a')) return { rows: [{ id: 'b2', at: '2026-11-05T08:00:00.000Z', ends_at: '2026-11-05T09:00:00.000Z', purpose: 'استشارة', status: 'scheduled', client_name: 'Client' }] };
+    if (sql.includes('FROM court_notices n')) return { rows: [{ id: 'n6', at: '2026-11-08T00:00:00.000Z', notice_type: 'summons', recipient: 'Opponent', bailiff_office: null, delivery_status: 'pending', case_id: caseId, case_number: '2026/1' }] };
     if (sql.includes('FROM tasks t')) return { rows: [{ id: 'c3', at: '2026-11-07T12:00:00.000Z', title: 'Draft', status: 'pending', priority: 'high' }] };
     if (sql.includes('FROM invoices i')) return { rows: [{ id: 'd4', at: '2026-11-20T00:00:00.000Z', invoice_number: 'INV-1', amount: '100.00', currency: 'ILS', status: 'unpaid' }] };
     return { rows: [] };
@@ -92,9 +95,9 @@ test('the calendar merges hearings, appointments, task deadlines and claims due,
   const response = await request('GET', '/api/calendar?from=2026-11-01&to=2026-11-30');
   assert.equal(response.status, 200);
   const { events } = await response.json();
-  assert.deepEqual(events.map((event) => event.kind), ['appointment', 'task', 'hearing', 'invoice']);
-  assert.equal(events[3].details.amount, 100);
-  assert.equal(calls.length, 4);
+  assert.deepEqual(events.map((event) => event.kind), ['appointment', 'task', 'notice', 'hearing', 'invoice']);
+  assert.equal(events[4].details.amount, 100);
+  assert.equal(calls.length, 6);
   for (const { sql, parameters } of calls) {
     assert.match(sql, /\.office_id = \$3/);
     assert.equal(parameters[2], officeId);
@@ -155,4 +158,42 @@ test('an appointment must end after it starts', async (t) => {
   });
   assert.equal(response.status, 400);
   assert.equal(calls.length, 0);
+});
+
+test("the administrator can narrow the calendar to one member's agenda, without the office's claims", async (t) => {
+  const calls = setup(t, 'admin', async () => ({ rows: [] }));
+  const response = await request('GET', `/api/calendar?from=2026-11-01&to=2026-11-30&userId=${lawyerId}`);
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 5);
+  assert.equal(calls.some(({ sql }) => sql.includes('FROM invoices')), false);
+  for (const { parameters } of calls) assert.deepEqual(parameters.slice(2), [officeId, lawyerId]);
+});
+
+test("a lawyer cannot open another member's agenda", async (t) => {
+  const calls = setup(t, 'lawyer');
+  assert.equal((await request('GET', `/api/calendar?from=2026-11-01&to=2026-11-30&userId=${lawyerId}`)).status, 403);
+  assert.equal(calls.length, 0);
+});
+
+test('an expert session needs no client, but a client meeting does', async (t) => {
+  const calls = setup(t, 'admin', async () => ({ rowCount: 1, rows: [{ appointment_id: 'e6' }] }));
+  const base = { user_id: lawyerId, starts_at: '2026-11-05T08:00:00Z', ends_at: '2026-11-05T09:00:00Z', purpose: 'x' };
+  assert.equal((await request('POST', '/api/calendar/appointments', { ...base, appointment_type: 'meeting' })).status, 400);
+  assert.equal((await request('POST', '/api/calendar/appointments', { ...base, appointment_type: 'lunch' })).status, 400);
+  assert.equal(calls.length, 0);
+  const response = await request('POST', '/api/calendar/appointments', { ...base, appointment_type: 'expert_session', case_id: caseId });
+  assert.equal(response.status, 201);
+  assert.match(calls[0].sql, /\$1::uuid IS NULL OR c\.client_id IS NOT NULL/);
+  assert.deepEqual(calls[0].parameters.slice(0, 4), [null, lawyerId, caseId, officeId]);
+  assert.equal(calls[0].parameters[8], 'expert_session');
+});
+
+test('approved leave shows on each of its days within the range, for the whole office', async (t) => {
+  const calls = setup(t, 'admin', async (sql) => (sql.includes('FROM leave_requests l')
+    ? { rows: [{ id: 'l1', starts_on: '2026-11-03', ends_on: '2026-11-05', leave_type: 'annual', full_name: 'Lawyer' }] }
+    : { rows: [] }));
+  const response = await request('GET', '/api/calendar?from=2026-11-01&to=2026-11-30');
+  const { events } = await response.json();
+  assert.deepEqual(events.filter((event) => event.kind === 'leave').map((event) => event.at.slice(0, 10)), ['2026-11-03', '2026-11-04', '2026-11-05']);
+  assert.match(calls.find(({ sql }) => sql.includes('FROM leave_requests l')).sql, /l\.status = 'approved'/);
 });

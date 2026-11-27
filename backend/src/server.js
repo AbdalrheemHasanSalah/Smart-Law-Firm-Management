@@ -1,5 +1,6 @@
 import app from './app.js';
 import { notify } from './services/notificationService.js';
+import { reminderConfig, runReminders } from './services/reminderService.js';
 import { sendSubscriptionReminders } from './services/subscriptionService.js';
 
 const port = Number(process.env.PORT) || 3000;
@@ -23,3 +24,17 @@ async function remindExpiringSubscriptions() {
 }
 setTimeout(remindExpiringSubscriptions, 60_000).unref();
 setInterval(remindExpiringSubscriptions, REMINDER_INTERVAL_MS).unref();
+
+// Hearing, task, appointment and power-of-attorney reminders: checked every fifteen minutes.
+// Each reminder is claimed in the database before it is sent, so none is sent twice.
+const SCHEDULED_REMINDERS_MS = 15 * 60 * 1000;
+reminderConfig(); // Fails at start, not hours later, when REMINDER_TIMEZONE or the hour is wrong.
+async function sendScheduledReminders() {
+  try {
+    await runReminders();
+  } catch (error) {
+    console.error('Scheduled reminders could not be sent.', { name: error?.name ?? 'Error' });
+  }
+}
+setTimeout(sendScheduledReminders, 90_000).unref();
+setInterval(sendScheduledReminders, SCHEDULED_REMINDERS_MS).unref();

@@ -3,7 +3,11 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { PATHS } from '@/auth/auth'
 import { api } from '@/lib/api'
-import { CASE_STATUS, CASE_TYPE, formatDate, formatMoney, formatTime, INVOICE_STATE, PRIORITY, ROLE, TASK_STATUS } from '@/lib/labels'
+import { APPOINTMENT_TYPE, CASE_STATUS, CASE_TYPE, formatDate, formatMoney, formatTime, INVOICE_STATE, PRIORITY, ROLE, TASK_STATUS } from '@/lib/labels'
+import { POA_TYPE } from '@/lib/powersOfAttorney'
+import { DELIVERY_STATUS, NOTICE_TYPE } from '@/lib/courtNotices'
+import { HEARING_STATUS } from '@/lib/hearings'
+import { EXPENSE_CATEGORY } from '@/lib/officeFinance'
 import type { AuditEntry } from '@/lib/types'
 import { Button, cn } from '@/ui/kit'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
@@ -31,6 +35,27 @@ const ACTION: Record<string, string> = {
   account_status_changed: 'غيّر حالة حساب',
   subscription_payment_recorded: 'سجّل دفعة اشتراك',
   subscription_paid_online: 'دفع الاشتراك إلكترونياً',
+  poa_created: 'سجّل توكيلاً',
+  hearing_held: 'سجّل نتيجة جلسة',
+  account_created: 'أنشأ حساباً مالياً',
+  account_transfer: 'حوّل بين حسابين',
+  custody_issued: 'صرف عُهدة',
+  custody_settled: 'سوّى عُهدة',
+  expense_recorded: 'سجّل مصروفاً',
+  expense_cancelled: 'ألغى مصروفاً',
+  staff_record_saved: 'حدّث سجلّ عضو في الفريق',
+  advance_given: 'صرف سلفة على الراتب',
+  payroll_prepared: 'حضّر رواتب الشهر',
+  payslip_paid: 'صرف راتباً',
+  leave_approved: 'وافق على إجازة',
+  leave_rejected: 'رفض إجازة',
+  hearing_postponed: 'سجّل تأجيل جلسة',
+  hearing_cancelled: 'سجّل إلغاء جلسة',
+  court_notice_recorded: 'سجّل ورقة محضر',
+  court_notice_updated: 'حدّث ورقة محضر',
+  poa_updated: 'عدّل توكيلاً',
+  poa_revoked: 'ألغى توكيلاً',
+  poa_scan_attached: 'أرفق صورة توكيل',
 }
 
 const FIELD: Record<string, string> = {
@@ -62,6 +87,39 @@ const FIELD: Record<string, string> = {
   completed_at: 'تاريخ الإنجاز',
   case_id: 'القضية',
   assigned_to_name: 'المسؤول',
+  poa_number: 'رقم التوكيل',
+  outcome: 'النتيجة',
+  postponement_reason: 'سبب التأجيل',
+  notice_type: 'نوع الورقة',
+  recipient: 'المبلَّغ إليه',
+  bailiff_office: 'دائرة المحضرين',
+  sent_on: 'تاريخ الإرسال',
+  delivery_status: 'حالة التبليغ',
+  delivered_on: 'تاريخ التبليغ',
+  notes: 'ملاحظات',
+  appointment_type: 'نوع الموعد',
+  category: 'البند',
+  amount: 'المبلغ',
+  currency: 'العملة',
+  spent_on: 'التاريخ',
+  opening_balance: 'الرصيد الافتتاحي',
+  spent: 'المُنفق',
+  returned_amount: 'المردود',
+  job_title: 'المسمّى',
+  monthly_salary: 'الراتب',
+  salary_currency: 'عملة الراتب',
+  annual_leave_days: 'الإجازة السنوية',
+  given_on: 'التاريخ',
+  period: 'الشهر',
+  net: 'الصافي',
+  payslips: 'عدد الكشوف',
+  poa_type: 'نوع التوكيل',
+  issuing_authority: 'جهة الإصدار',
+  issued_on: 'تاريخ الإصدار',
+  expires_on: 'تاريخ الانتهاء',
+  scope: 'نطاق التوكيل',
+  lawyers: 'المحامون المفوَّضون',
+  cases: 'القضايا',
 }
 
 const FILTERS = [
@@ -71,6 +129,13 @@ const FILTERS = [
   ['task', 'المهام'],
   ['opponent', 'الخصوم'],
   ['invoice', 'المالية'],
+  ['power_of_attorney', 'التوكيلات'],
+  ['expense', 'المصاريف'],
+  ['custody', 'العُهد'],
+  ['account', 'الحسابات'],
+  ['staff', 'سجلّات الفريق'],
+  ['payroll', 'الرواتب'],
+  ['leave', 'الإجازات'],
 ] as const
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T/
@@ -78,7 +143,15 @@ const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T/
 /** A value as a person reads it: labels for statuses, dates as dates, empty as a dash. */
 const readable = (field: string, value: unknown, entityType: string): string => {
   if (value === null || value === undefined || value === '') return '—'
+  if (Array.isArray(value)) return value.length ? value.join('، ') : '—'
   if (typeof value === 'string') {
+    if (entityType === 'power_of_attorney' && field === 'status') return value === 'revoked' ? 'ملغى' : 'ساري'
+    if (field === 'poa_type') return POA_TYPE[value as keyof typeof POA_TYPE] ?? value
+    if (field === 'notice_type') return NOTICE_TYPE[value as keyof typeof NOTICE_TYPE] ?? value
+    if (field === 'delivery_status') return DELIVERY_STATUS[value as keyof typeof DELIVERY_STATUS]?.text ?? value
+    if (field === 'appointment_type') return APPOINTMENT_TYPE[value] ?? value
+    if (field === 'category' && entityType === 'expense') return EXPENSE_CATEGORY[value as keyof typeof EXPENSE_CATEGORY] ?? value
+    if (field === 'status' && entityType === 'case' && !CASE_STATUS[value]) return HEARING_STATUS[value as keyof typeof HEARING_STATUS]?.text ?? value
     if (field === 'status') return (entityType === 'task' ? TASK_STATUS : entityType === 'invoice' ? INVOICE_STATE : CASE_STATUS)[value]?.text ?? value
     if (field === 'priority') return PRIORITY[value]?.text ?? value
     if (field === 'case_type') return CASE_TYPE[value] ?? value

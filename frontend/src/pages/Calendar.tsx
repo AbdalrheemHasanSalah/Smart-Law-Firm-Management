@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Gavel, ListChecks, Plus, Receipt, Users, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Gavel, ListChecks, Palmtree, Plus, Receipt, ScrollText, Users, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { PATHS, personaOf, useAuth } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
-import { formatDay, formatMoney, formatTime, PRIORITY, ROLE } from '@/lib/labels'
+import { APPOINTMENT_TYPE, formatDay, formatMoney, formatTime, optionsOf, PRIORITY, ROLE } from '@/lib/labels'
+import { DELIVERY_STATUS, NOTICE_TYPE, type DeliveryStatus, type NoticeType } from '@/lib/courtNotices'
+import { LEAVE_TYPE, type LeaveType } from '@/lib/hr'
 import { useParam } from '@/lib/useParam'
 import type { Client, Member } from '@/lib/types'
 import { FormActions, Modal, SelectField, TextArea } from '@/ui/forms'
@@ -13,7 +15,7 @@ import { Failed, Loading, SheetHeader } from '@/ui/Shell'
 import { useCases } from './Office'
 import { LOCALE } from '@/lib/i18n'
 
-type Kind = 'hearing' | 'appointment' | 'task' | 'invoice'
+type Kind = 'hearing' | 'appointment' | 'notice' | 'leave' | 'task' | 'invoice'
 
 type CalendarEvent = {
   kind: Kind
@@ -30,7 +32,9 @@ type CalendarEvent = {
 /** Each kind keeps one colour everywhere on the page: the chip, the dot and the legend. */
 const KIND: Record<Kind, { label: string; icon: LucideIcon; chip: string; dot: string }> = {
   hearing: { label: 'جلسات المحاكم', icon: Gavel, chip: 'bg-stamp/10 text-stamp', dot: 'bg-stamp' },
-  appointment: { label: 'مواعيد الموكّلين', icon: Users, chip: 'bg-stamp-blue/10 text-stamp-blue', dot: 'bg-stamp-blue' },
+  appointment: { label: 'المواعيد', icon: Users, chip: 'bg-stamp-blue/10 text-stamp-blue', dot: 'bg-stamp-blue' },
+  notice: { label: 'أوراق المحضرين', icon: ScrollText, chip: 'bg-manila/60 text-ink', dot: 'bg-manila-deep' },
+  leave: { label: 'الإجازات', icon: Palmtree, chip: 'bg-note-blue/60 text-ink', dot: 'bg-ink-faint' },
   task: { label: 'مواعيد المهام', icon: ListChecks, chip: 'bg-ink/8 text-ink', dot: 'bg-ink' },
   invoice: { label: 'استحقاق المطالبات', icon: Receipt, chip: 'bg-stamp-green/15 text-stamp-green', dot: 'bg-stamp-green' },
 }
@@ -58,13 +62,22 @@ const monthGrid = (month: Date) => {
   const start = addDays(first, -((first.getDay() + 1) % 7))
   return Array.from({ length: 42 }, (_, index) => addDays(start, index))
 }
-/** An invoice falls due on a date; the rest happen at a time of day. */
-const hasTime = (event: CalendarEvent) => event.kind !== 'invoice'
+/** An invoice falls due and a notice is sent on a date; the rest happen at a time of day. */
+const hasTime = (event: CalendarEvent) => !['invoice', 'notice', 'leave'].includes(event.kind)
 
-const useCalendar = (from: string, to: string) =>
+/** The calendar for a range; `userId` narrows the administrator's view to one member's agenda. */
+const useCalendar = (from: string, to: string, userId: string | null) =>
   useQuery({
-    queryKey: ['calendar', from, to],
-    queryFn: async () => (await api.get<{ events: CalendarEvent[] }>('/calendar', { params: { from, to } })).data.events,
+    queryKey: ['calendar', from, to, userId],
+    queryFn: async () => (await api.get<{ events: CalendarEvent[] }>('/calendar', { params: { from, to, ...(userId ? { userId } : {}) } })).data.events,
+  })
+
+const useStaff = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['members'],
+    enabled,
+    queryFn: async () => (await api.get<{ users: Member[] }>('/users', { params: { pageSize: 50 } })).data.users,
+    select: (members) => members.filter((member) => member.role !== 'client' && member.status === 'active'),
   })
 
 /* ───────────────────────── scheduling ───────────────────────── */
@@ -128,19 +141,21 @@ const NewAppointment = ({ open, day, onClose }: { open: boolean; day: string; on
   const queryClient = useQueryClient()
   const cases = useCases()
   const clients = useQuery({ queryKey: ['clients'], enabled: open, queryFn: async () => (await api.get<{ clients: Client[] }>('/clients', { params: { pageSize: 50 } })).data.clients })
-  const members = useQuery({ queryKey: ['members'], enabled: open, queryFn: async () => (await api.get<{ users: Member[] }>('/users', { params: { pageSize: 50 } })).data.users })
-  const empty = { clientId: '', userId: '', caseId: '', date: day, start: '10:00', end: '11:00', purpose: '', location: '' }
+  const members = useStaff(open)
+  const empty = { type: 'meeting', clientId: '', userId: '', caseId: '', date: day, start: '10:00', end: '11:00', purpose: '', location: '' }
   const [values, setValues] = useState(empty)
   useEffect(() => {
     if (open) setValues({ ...empty, date: day })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, day])
   const set = (key: keyof typeof values) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }))
-  const staff = (members.data ?? []).filter((member) => member.role !== 'client' && member.status === 'active')
+  const staff = members.data ?? []
+  const meeting = values.type === 'meeting'
   const create = useMutation({
     mutationFn: () =>
       api.post('/calendar/appointments', {
-        client_id: values.clientId,
+        appointment_type: values.type,
+        ...(values.clientId ? { client_id: values.clientId } : {}),
         user_id: values.userId,
         starts_at: new Date(`${values.date}T${values.start}`).toISOString(),
         ends_at: new Date(`${values.date}T${values.end}`).toISOString(),
@@ -155,7 +170,7 @@ const NewAppointment = ({ open, day, onClose }: { open: boolean; day: string; on
   })
   const badTime = values.end <= values.start
   return (
-    <Modal open={open} onClose={onClose} title="موعد مع موكّل">
+    <Modal open={open} onClose={onClose} title="موعد جديد">
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -163,8 +178,9 @@ const NewAppointment = ({ open, day, onClose }: { open: boolean; day: string; on
         }}
         className="grid gap-4 sm:grid-cols-2"
       >
-        <Field label="الغرض" name="purpose" required placeholder="استشارة، توقيع وكالة، مراجعة ملف…" value={values.purpose} onChange={set('purpose')} className="sm:col-span-2" />
-        <SelectField label="الموكّل" name="client" required value={values.clientId} onChange={set('clientId')} options={[['', 'اختر موكّلاً'], ...(clients.data ?? []).map((client) => [client.client_id, client.full_name_or_org] as const)]} />
+        <SelectField label="نوع الموعد" name="appointment_type" value={values.type} onChange={set('type')} options={optionsOf(APPOINTMENT_TYPE)} />
+        <Field label="الغرض" name="purpose" required placeholder={meeting ? 'استشارة، توقيع وكالة، مراجعة ملف…' : 'جلسة خبرة، كشف حسّي، مراجعة قلم المحكمة…'} value={values.purpose} onChange={set('purpose')} />
+        <SelectField label={meeting ? 'الموكّل' : 'الموكّل (اختياري)'} name="client" required={meeting} value={values.clientId} onChange={set('clientId')} options={[['', meeting ? 'اختر موكّلاً' : 'بدون موكّل'], ...(clients.data ?? []).map((client) => [client.client_id, client.full_name_or_org] as const)]} />
         <SelectField label="من المكتب" name="staff" required value={values.userId} onChange={set('userId')} options={[['', 'اختر عضواً'], ...staff.map((member) => [member.user_id, `${member.full_name} — ${ROLE[member.role]}`] as const)]} />
         <Field label="اليوم" name="date" type="date" dir="ltr" required value={values.date} onChange={set('date')} />
         <div className="grid grid-cols-2 gap-3">
@@ -178,7 +194,7 @@ const NewAppointment = ({ open, day, onClose }: { open: boolean; day: string; on
             <Button variant="line" onClick={onClose}>
               إلغاء
             </Button>
-            <Button type="submit" variant="ink" disabled={!values.clientId || !values.userId || !values.purpose.trim() || badTime || create.isPending}>
+            <Button type="submit" variant="ink" disabled={(meeting && !values.clientId) || !values.userId || !values.purpose.trim() || badTime || create.isPending}>
               {create.isPending ? 'يُحفظ…' : 'احفظ الموعد'}
             </Button>
           </FormActions>
@@ -223,7 +239,11 @@ const EventDetails = ({ event }: { event: CalendarEvent }) => {
     event.kind === 'hearing'
       ? [d.case_title as string, d.court_name ? `محكمة ${d.court_name}` : null, d.court_room ? `قاعة ${d.court_room}` : null, d.notes as string]
       : event.kind === 'appointment'
-        ? [`مع ${d.client_name}`, `${d.staff_name} من المكتب`, d.location as string]
+        ? [APPOINTMENT_TYPE[String(d.appointment_type ?? 'meeting')] ?? null, d.client_name ? `مع ${d.client_name}` : null, `${d.staff_name} من المكتب`, d.location as string]
+        : event.kind === 'leave'
+          ? [`إجازة ${LEAVE_TYPE[d.leave_type as LeaveType] ?? ''}`, `${formatDay(String(d.starts_on))} – ${formatDay(String(d.ends_on))}`]
+        : event.kind === 'notice'
+          ? [NOTICE_TYPE[d.notice_type as NoticeType] ?? null, d.bailiff_office as string, DELIVERY_STATUS[event.status as DeliveryStatus]?.text ?? null]
         : event.kind === 'task'
           ? [d.private ? null : `المسؤول: ${d.assignee_name}`, PRIORITY[String(d.priority)] ? `أولوية ${PRIORITY[String(d.priority)]?.text}` : null]
           : [String(d.client_name), formatMoney(Number(d.amount), String(d.currency))]
@@ -300,9 +320,14 @@ export const Calendar = () => {
   })
   const [hidden, setHidden] = useState<Kind[]>([])
   const [adding, setAdding] = useState<'hearing' | 'appointment' | null>(null)
+  const [focusParam, setFocus] = useParam('member')
+  const focus = owner ? focusParam : null
+  const staff = useStaff(owner)
+  // One member's agenda leaves out the office's claims, as the server does.
+  const visibleKinds = focus ? kinds.filter((kind) => kind !== 'invoice') : kinds
 
   const grid = useMemo(() => monthGrid(month), [month])
-  const calendar = useCalendar(dayKey(grid[0] ?? month), dayKey(grid[grid.length - 1] ?? month))
+  const calendar = useCalendar(dayKey(grid[0] ?? month), dayKey(grid[grid.length - 1] ?? month), focus)
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>()
     for (const event of calendar.data ?? []) {
@@ -323,13 +348,13 @@ export const Calendar = () => {
     const date = new Date(event.at)
     return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear()
   })
-  const counts = Object.fromEntries(kinds.map((kind) => [kind, monthEvents.filter((event) => event.kind === kind).length])) as Record<Kind, number>
+  const counts = Object.fromEntries(visibleKinds.map((kind) => [kind, monthEvents.filter((event) => event.kind === kind).length])) as Record<Kind, number>
 
   return (
     <>
       <SheetHeader
         title="التقويم"
-        note={owner ? 'جلسات المحاكم ومواعيد الموكّلين ومواعيد المهام واستحقاق المطالبات في مكان واحد.' : 'جلسات قضاياك ومواعيدك مع الموكّلين ومواعيد مهامك. يحدّد مدير المكتب الجلسات والمواعيد.'}
+        note={owner ? 'جلسات المحاكم والمواعيد وأوراق المحضرين ومواعيد المهام واستحقاق المطالبات في مكان واحد.' : 'جلسات قضاياك ومواعيدك وأوراق المحضرين في قضاياك ومواعيد مهامك. يحدّد مدير المكتب الجلسات والمواعيد.'}
         action={
           owner && <div className="flex flex-wrap gap-2">
             <Button variant="stamp" size="sm" onClick={() => setAdding('hearing')}>
@@ -338,7 +363,7 @@ export const Calendar = () => {
             </Button>
             <Button variant="line" size="sm" onClick={() => setAdding('appointment')}>
               <Plus className="size-4" aria-hidden="true" />
-              موعد مع موكّل
+              موعد جديد
             </Button>
           </div>
         }
@@ -357,8 +382,23 @@ export const Calendar = () => {
             اليوم
           </Button>
         </div>
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="ما يظهر في التقويم">
-          {kinds.map((kind) => {
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="ما يظهر في التقويم">
+          {owner && (
+            <select
+              aria-label="أجندة"
+              value={focus ?? ''}
+              onChange={(event) => setFocus(event.target.value || null)}
+              className="me-1 rounded-full border border-ink/15 bg-transparent px-3 py-1 text-xs font-semibold text-ink"
+            >
+              <option value="">كل المكتب</option>
+              {(staff.data ?? []).map((member) => (
+                <option key={member.user_id} value={member.user_id}>
+                  أجندة {member.full_name}
+                </option>
+              ))}
+            </select>
+          )}
+          {visibleKinds.map((kind) => {
             const shown = !hidden.includes(kind)
             return (
               <button

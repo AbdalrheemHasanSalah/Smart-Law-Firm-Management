@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS app_users (
     status VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'suspended')),
     is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Reminder emails (hearings, tasks, appointments); in-app reminders are always kept.
+    email_reminders BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     role_id UUID NOT NULL REFERENCES roles(role_id)
@@ -278,6 +280,16 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
 );
 
+-- One row per reminder sent to one person; inserting it first claims the reminder, so it is
+-- never sent twice.
+CREATE TABLE IF NOT EXISTS reminder_deliveries (
+    reminder_key VARCHAR(200) NOT NULL,
+    user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (reminder_key, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     body TEXT NOT NULL,
@@ -304,14 +316,19 @@ CREATE TABLE IF NOT EXISTS appointments (
     purpose TEXT NOT NULL,
     location TEXT,
     external_party_name VARCHAR(200),
-    client_id UUID NOT NULL REFERENCES clients(client_id),
+    appointment_type VARCHAR(20) NOT NULL DEFAULT 'meeting'
+        CONSTRAINT appointments_type_check
+        CHECK (appointment_type IN ('meeting', 'expert_session', 'court_visit', 'other')),
+    -- A client meeting needs a client; other appointments may have none.
+    client_id UUID REFERENCES clients(client_id),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID REFERENCES legal_cases(case_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
     FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
     FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id),
     FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
-    CHECK (ends_at > starts_at)
+    CHECK (ends_at > starts_at),
+    CONSTRAINT appointments_meeting_client_check CHECK (appointment_type <> 'meeting' OR client_id IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS hearings (
@@ -323,10 +340,19 @@ CREATE TABLE IF NOT EXISTS hearings (
     status VARCHAR(30) NOT NULL DEFAULT 'scheduled'
         CHECK (status IN ('scheduled', 'completed', 'postponed', 'cancelled')),
     notes TEXT,
+    -- The outcome as recorded after the session: who attended, why it was postponed, and the
+    -- hearing it was postponed to.
+    attended_by_user_id UUID,
+    postponement_reason TEXT,
+    next_hearing_id UUID REFERENCES hearings(hearing_id) ON DELETE SET NULL,
+    outcome_recorded_at TIMESTAMPTZ,
+    outcome_recorded_by_user_id UUID REFERENCES app_users(user_id),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
     court_id UUID REFERENCES courts(court_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
-    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    CONSTRAINT hearings_attended_by_member_fkey FOREIGN KEY (office_id, attended_by_user_id)
+        REFERENCES office_memberships(office_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -417,6 +443,87 @@ CREATE TABLE IF NOT EXISTS contracts (
     FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
 );
 
+CREATE TABLE IF NOT EXISTS powers_of_attorney (
+    poa_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    poa_number VARCHAR(60) NOT NULL,
+    poa_type VARCHAR(20) NOT NULL
+        CHECK (poa_type IN ('general', 'special', 'litigation')),
+    issuing_authority VARCHAR(200),
+    issued_on DATE NOT NULL,
+    expires_on DATE,
+    scope TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'revoked')),
+    revoked_at TIMESTAMPTZ,
+    scan_key TEXT UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    client_id UUID NOT NULL,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT powers_of_attorney_office_key UNIQUE (office_id, poa_id),
+    CONSTRAINT powers_of_attorney_office_number_key UNIQUE (office_id, poa_number),
+    CONSTRAINT powers_of_attorney_dates_check CHECK (expires_on IS NULL OR expires_on >= issued_on),
+    CONSTRAINT powers_of_attorney_revoked_check CHECK ((status = 'revoked') = (revoked_at IS NOT NULL)),
+    CONSTRAINT powers_of_attorney_client_fkey FOREIGN KEY (office_id, client_id)
+        REFERENCES clients(office_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS power_of_attorney_lawyers (
+    poa_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    office_id UUID NOT NULL,
+    PRIMARY KEY (poa_id, user_id),
+    FOREIGN KEY (office_id, poa_id) REFERENCES powers_of_attorney(office_id, poa_id) ON DELETE CASCADE,
+    FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS power_of_attorney_cases (
+    poa_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    office_id UUID NOT NULL,
+    PRIMARY KEY (poa_id, case_id),
+    FOREIGN KEY (office_id, poa_id) REFERENCES powers_of_attorney(office_id, poa_id) ON DELETE CASCADE,
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS court_notices (
+    notice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    notice_type VARCHAR(20) NOT NULL
+        CHECK (notice_type IN ('notification', 'summons', 'judgment_service', 'execution')),
+    recipient VARCHAR(200),
+    bailiff_office VARCHAR(200),
+    sent_on DATE NOT NULL,
+    delivery_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (delivery_status IN ('pending', 'delivered', 'returned', 'refused')),
+    delivered_on DATE,
+    notes TEXT,
+    attachment_key TEXT UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    case_id UUID NOT NULL,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT court_notices_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id),
+    CONSTRAINT court_notices_dates_check CHECK (delivered_on IS NULL OR delivered_on >= sent_on),
+    CONSTRAINT court_notices_delivered_check CHECK (delivery_status = 'pending' OR delivered_on IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS finance_accounts (
+    account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('cash', 'bank', 'wallet')),
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    opening_balance NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    opened_on DATE NOT NULL DEFAULT CURRENT_DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT finance_accounts_office_account_key UNIQUE (office_id, account_id),
+    CONSTRAINT finance_accounts_office_name_key UNIQUE (office_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
     invoice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     invoice_number VARCHAR(50) NOT NULL,
@@ -452,12 +559,220 @@ CREATE TABLE IF NOT EXISTS payments (
     invoice_id UUID NOT NULL REFERENCES invoices(invoice_id),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    -- The account the payment was received into (optional; older payments have none).
+    account_id UUID,
     -- Unique within an office only, so no office can learn which references another has used.
     CONSTRAINT payments_office_reference_key UNIQUE (office_id, reference_number),
     CONSTRAINT payments_method_check
         CHECK (payment_method IN ('cash', 'bank_transfer', 'cheque', 'card')),
-    FOREIGN KEY (office_id, invoice_id) REFERENCES invoices(office_id, invoice_id)
+    FOREIGN KEY (office_id, invoice_id) REFERENCES invoices(office_id, invoice_id),
+    CONSTRAINT payments_account_fkey FOREIGN KEY (office_id, account_id)
+        REFERENCES finance_accounts(office_id, account_id)
 );
+
+CREATE TABLE IF NOT EXISTS custodies (
+    custody_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    holder_user_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    issued_on DATE NOT NULL,
+    purpose TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'settled')),
+    settled_on DATE,
+    returned_amount NUMERIC(12, 2) CHECK (returned_amount >= 0),
+    return_account_id UUID,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT custodies_office_custody_key UNIQUE (office_id, custody_id),
+    CONSTRAINT custodies_holder_fkey FOREIGN KEY (office_id, holder_user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT custodies_account_fkey FOREIGN KEY (office_id, account_id)
+        REFERENCES finance_accounts(office_id, account_id),
+    CONSTRAINT custodies_return_account_fkey FOREIGN KEY (office_id, return_account_id)
+        REFERENCES finance_accounts(office_id, account_id),
+    CONSTRAINT custodies_settled_check CHECK (
+        (status = 'open' AND settled_on IS NULL AND returned_amount IS NULL AND return_account_id IS NULL)
+        OR (status = 'settled' AND settled_on IS NOT NULL AND returned_amount IS NOT NULL
+            AND (returned_amount = 0 OR return_account_id IS NOT NULL))
+    ),
+    CONSTRAINT custodies_dates_check CHECK (settled_on IS NULL OR settled_on >= issued_on)
+);
+
+CREATE TABLE IF NOT EXISTS office_expenses (
+    expense_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category VARCHAR(20) NOT NULL
+        CHECK (category IN ('rent', 'salaries', 'utilities', 'supplies', 'transport', 'court_costs', 'other')),
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    spent_on DATE NOT NULL,
+    payee VARCHAR(200),
+    description TEXT,
+    -- Paid either from an office account or from a custody, never both.
+    account_id UUID,
+    custody_id UUID,
+    case_id UUID,
+    receipt_key TEXT UNIQUE,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+    cancelled_at TIMESTAMPTZ,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT office_expenses_office_expense_key UNIQUE (office_id, expense_id),
+    CONSTRAINT office_expenses_source_check CHECK (num_nonnulls(account_id, custody_id) = 1),
+    CONSTRAINT office_expenses_cancelled_check CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL)),
+    CONSTRAINT office_expenses_account_fkey FOREIGN KEY (office_id, account_id)
+        REFERENCES finance_accounts(office_id, account_id),
+    CONSTRAINT office_expenses_custody_fkey FOREIGN KEY (office_id, custody_id)
+        REFERENCES custodies(office_id, custody_id),
+    CONSTRAINT office_expenses_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id)
+);
+
+CREATE TABLE IF NOT EXISTS staff_profiles (
+    user_id UUID NOT NULL,
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    job_title VARCHAR(100),
+    hire_date DATE,
+    phone VARCHAR(30),
+    -- Seen by the office administrator and the person only.
+    national_id VARCHAR(30),
+    monthly_salary NUMERIC(12, 2) CHECK (monthly_salary >= 0),
+    salary_currency CHAR(3) NOT NULL DEFAULT 'ILS' CHECK (salary_currency IN ('ILS', 'JOD', 'USD')),
+    annual_leave_days INTEGER NOT NULL DEFAULT 14 CHECK (annual_leave_days BETWEEN 0 AND 60),
+    -- Listed (name and job title only) on the office's public page.
+    show_on_public_page BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (office_id, user_id),
+    FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS salary_advances (
+    advance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    given_on DATE NOT NULL,
+    note TEXT,
+    expense_id UUID NOT NULL,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT salary_advances_member_fkey FOREIGN KEY (office_id, user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT salary_advances_expense_fkey FOREIGN KEY (office_id, expense_id)
+        REFERENCES office_expenses(office_id, expense_id)
+);
+
+CREATE TABLE IF NOT EXISTS payslips (
+    payslip_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    period CHAR(7) NOT NULL CHECK (period ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+    salary NUMERIC(12, 2) NOT NULL CHECK (salary >= 0),
+    advance_deduction NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (advance_deduction >= 0),
+    other_deductions NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (other_deductions >= 0),
+    deduction_note TEXT,
+    net NUMERIC(12, 2) NOT NULL,
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'paid')),
+    paid_on DATE,
+    expense_id UUID,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT payslips_office_member_period_key UNIQUE (office_id, user_id, period),
+    CONSTRAINT payslips_member_fkey FOREIGN KEY (office_id, user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT payslips_expense_fkey FOREIGN KEY (office_id, expense_id)
+        REFERENCES office_expenses(office_id, expense_id),
+    CONSTRAINT payslips_net_check CHECK (net = salary - advance_deduction - other_deductions AND net >= 0),
+    -- A paid payslip has its date; its expense exists whenever something was paid out.
+    CONSTRAINT payslips_paid_check CHECK (
+        (status = 'draft' AND paid_on IS NULL AND expense_id IS NULL)
+        OR (status = 'paid' AND paid_on IS NOT NULL AND (net = 0 OR expense_id IS NOT NULL))
+    )
+);
+
+CREATE TABLE IF NOT EXISTS leave_requests (
+    leave_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    leave_type VARCHAR(20) NOT NULL CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'other')),
+    starts_on DATE NOT NULL,
+    ends_on DATE NOT NULL,
+    -- Working days in the leave (Fridays are not counted), worked out when it is requested.
+    days INTEGER NOT NULL CHECK (days > 0),
+    reason TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    decided_by_user_id UUID REFERENCES app_users(user_id),
+    decided_at TIMESTAMPTZ,
+    decision_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT leave_requests_member_fkey FOREIGN KEY (office_id, user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT leave_requests_dates_check CHECK (ends_on >= starts_on),
+    CONSTRAINT leave_requests_decided_check CHECK (
+        (status IN ('approved', 'rejected')) = (decided_at IS NOT NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS office_public_pages (
+    office_id UUID PRIMARY KEY REFERENCES law_offices(office_id),
+    -- Lower-case Latin letters, digits and single hyphens, unique across the platform.
+    slug VARCHAR(60) NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+    is_published BOOLEAN NOT NULL DEFAULT FALSE,
+    tagline VARCHAR(200),
+    about TEXT,
+    practice_areas TEXT[] NOT NULL DEFAULT '{}',
+    whatsapp VARCHAR(30),
+    working_hours VARCHAR(300),
+    map_url VARCHAR(500) CHECK (map_url IS NULL OR map_url ~ '^https://'),
+    logo_key TEXT UNIQUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS consultation_requests (
+    request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    full_name VARCHAR(150) NOT NULL,
+    phone VARCHAR(30) NOT NULL,
+    email VARCHAR(254),
+    case_type VARCHAR(50),
+    message TEXT NOT NULL,
+    preferred_time VARCHAR(200),
+    status VARCHAR(20) NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new', 'contacted', 'converted', 'rejected')),
+    assigned_to_user_id UUID,
+    client_id UUID,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT consultation_requests_assignee_fkey FOREIGN KEY (office_id, assigned_to_user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT consultation_requests_client_fkey FOREIGN KEY (office_id, client_id)
+        REFERENCES clients(office_id, client_id),
+    CONSTRAINT consultation_requests_converted_check CHECK ((status = 'converted') = (client_id IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS account_transfers (
+    transfer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_account_id UUID NOT NULL,
+    to_account_id UUID NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    transferred_on DATE NOT NULL,
+    note TEXT,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT account_transfers_distinct_check CHECK (from_account_id <> to_account_id),
+    CONSTRAINT account_transfers_from_fkey FOREIGN KEY (office_id, from_account_id)
+        REFERENCES finance_accounts(office_id, account_id),
+    CONSTRAINT account_transfers_to_fkey FOREIGN KEY (office_id, to_account_id)
+        REFERENCES finance_accounts(office_id, account_id)
+);
+
 
 -- 13. Case notes
 CREATE TABLE IF NOT EXISTS case_notes (
@@ -595,3 +910,27 @@ CREATE INDEX IF NOT EXISTS idx_ai_interactions_document ON ai_interactions(docum
 CREATE INDEX IF NOT EXISTS idx_ai_interaction_sources_reference ON ai_interaction_sources(reference_id);
 CREATE INDEX IF NOT EXISTS idx_case_status_history_case_changed ON case_status_history(case_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_support_messages_status_created ON support_messages(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_powers_of_attorney_client ON powers_of_attorney(client_id);
+CREATE INDEX IF NOT EXISTS idx_powers_of_attorney_office_expiry ON powers_of_attorney(office_id, expires_on)
+    WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_power_of_attorney_lawyers_user ON power_of_attorney_lawyers(user_id);
+CREATE INDEX IF NOT EXISTS idx_power_of_attorney_cases_case ON power_of_attorney_cases(case_id);
+CREATE INDEX IF NOT EXISTS idx_hearings_office_date ON hearings(office_id, hearing_at);
+CREATE INDEX IF NOT EXISTS idx_court_notices_case ON court_notices(case_id, sent_on DESC);
+CREATE INDEX IF NOT EXISTS idx_court_notices_office_sent ON court_notices(office_id, sent_on);
+CREATE INDEX IF NOT EXISTS idx_reminder_deliveries_sent ON reminder_deliveries(sent_at);
+CREATE INDEX IF NOT EXISTS idx_payments_account ON payments(account_id) WHERE account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_custodies_holder ON custodies(holder_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_custodies_office_issued ON custodies(office_id, issued_on DESC);
+CREATE INDEX IF NOT EXISTS idx_office_expenses_office_spent ON office_expenses(office_id, spent_on DESC);
+CREATE INDEX IF NOT EXISTS idx_office_expenses_custody ON office_expenses(custody_id) WHERE custody_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_office_expenses_case ON office_expenses(case_id) WHERE case_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_account_transfers_office_date ON account_transfers(office_id, transferred_on DESC);
+CREATE INDEX IF NOT EXISTS idx_salary_advances_member ON salary_advances(office_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_payslips_office_period ON payslips(office_id, period);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_member ON leave_requests(office_id, user_id, starts_on DESC);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_office_dates ON leave_requests(office_id, starts_on, ends_on)
+    WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_consultation_requests_office ON consultation_requests(office_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultation_requests_assignee ON consultation_requests(assigned_to_user_id)
+    WHERE assigned_to_user_id IS NOT NULL;

@@ -171,6 +171,13 @@ async function plan(event, payload, query) {
       }
       return messages;
     }
+    case 'case.document_shared': {
+      // Only the client it was shared with hears of it; the team already had the document.
+      const context = await caseContext();
+      if (!context) return [];
+      const shared = context.clients.filter((client) => client.client_id === payload.clientId);
+      return [forClients(shared, 'مستند جديد في قضيتك', `شارك مكتبك معك مستنداً في قضيتك ${context.label}.`, 'case_document')];
+    }
     case 'case.staff_assigned': {
       const context = await caseContext();
       if (!context) return [];
@@ -189,6 +196,40 @@ async function plan(event, payload, query) {
         people: audience([assigned], actorUserId), officeId, type: 'task',
         title: 'مهمة جديدة لك', body: 'أُسندت إليك مهمة جديدة في المكتب.',
         path: '/office/tasks', button: 'افتح المهام',
+      }];
+    }
+    case 'consultation.received': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      return [{
+        people: audience([owner], actorUserId), officeId, type: 'consultation',
+        title: 'طلب استشارة جديد', body: 'وصل طلب استشارة جديد من صفحة المكتب العامة.',
+        path: '/office/consultations', button: 'افتح الطلبات',
+      }];
+    }
+    case 'consultation.assigned': {
+      const assignee = await rows(MEMBER_OF_OFFICE, [officeId, payload.userId]);
+      return [{
+        people: audience([assignee], actorUserId), officeId, type: 'consultation',
+        title: 'طلب استشارة لك', body: 'أسند إليك مدير المكتب طلب استشارة من صفحة المكتب العامة.',
+        path: '/office/consultations', button: 'افتح الطلبات',
+      }];
+    }
+    case 'leave.requested': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      return [{
+        people: audience([owner], actorUserId), officeId, type: 'team',
+        title: 'طلب إجازة جديد', body: `طلب أحد أعضاء الفريق إجازة لمدة ${payload.days} يوم عمل، وهو بانتظار قرارك.`,
+        path: '/office/team?tab=leave', button: 'راجع الطلب',
+      }];
+    }
+    case 'leave.decided': {
+      const requester = await rows(MEMBER_OF_OFFICE, [officeId, payload.userId]);
+      const approved = payload.status === 'approved';
+      return [{
+        people: audience([requester], actorUserId), officeId, type: 'team',
+        title: approved ? 'وُوفق على إجازتك' : 'لم يُوافق على إجازتك',
+        body: approved ? 'وافق مدير المكتب على طلب إجازتك.' : 'لم يوافق مدير المكتب على طلب إجازتك. افتح الطلب لترى الملاحظة.',
+        path: '/office/me', button: 'افتح صفحتي',
       }];
     }
     case 'task.completed': {

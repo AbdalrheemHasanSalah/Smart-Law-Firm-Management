@@ -28,9 +28,13 @@ import { Button, cn, Field, Stamp } from '@/ui/kit'
 import { ConflictNotice, useConflictCheck } from '@/ui/Conflicts'
 import { choiceReady, ClientChooser, clientBody, existingChoice, type ClientChoice } from '@/ui/ClientChooser'
 import { InvoicesTable, InvoiceTotals, NewInvoice, useInvoices } from '@/ui/Finance'
+import { ShareDocument } from '@/ui/ShareDocument'
 import { HearingPrepTab } from '@/ui/HearingPrep'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
+import { CasePowers } from './PowersOfAttorney'
+import { CaseHearings, CaseNotices } from './CaseSessions'
+import { CaseProfit } from './FinanceOffice'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -289,8 +293,11 @@ export const Cases = () => {
 
 const TABS = [
   ['people', 'الأطراف والفريق'],
+  ['hearings', 'الجلسات'],
+  ['notices', 'أوراق المحضرين'],
   ['notes', 'الملاحظات'],
   ['documents', 'المستندات'],
+  ['powers', 'التوكيلات'],
   ['tasks', 'المهام'],
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
@@ -569,7 +576,7 @@ const useDocuments = (caseId?: string, search = '') =>
     queryFn: async () => (await api.get<{ documents: DocumentRecord[] }>('/documents', { params: { pageSize: 50, ...(caseId ? { caseId } : {}), ...(search ? { search } : {}) } })).data.documents,
   })
 
-const DocumentsTable = ({ rows, cases }: { rows: DocumentRecord[]; cases?: LegalCase[] }) => (
+const DocumentsTable = ({ rows, cases, onShare }: { rows: DocumentRecord[]; cases?: LegalCase[]; onShare?: (document: DocumentRecord) => void }) => (
   <Table head={['الملف', 'النوع', ...(cases ? ['القضية'] : []), 'التاريخ', 'الوصول', '']}>
     {rows.map((row) => (
       <tr key={row.document_id} className={ROW}>
@@ -585,7 +592,14 @@ const DocumentsTable = ({ rows, cases }: { rows: DocumentRecord[]; cases?: Legal
           </Stamp>
         </td>
         <td className={cn(TD, 'text-end')}>
-          <DownloadLink href={`${API_URL}/documents/${row.document_id}/download`} />
+          <div className="flex flex-col items-end gap-1">
+            <DownloadLink href={`${API_URL}/documents/${row.document_id}/download`} />
+            {onShare && (
+              <button type="button" onClick={() => onShare(row)} className="text-xs font-semibold text-stamp-green underline-offset-4 hover:underline">
+                {row.access_level === 'authorized_users' ? 'المشاركة' : 'شارك مع الموكّل'}
+              </button>
+            )}
+          </div>
         </td>
       </tr>
     ))}
@@ -659,6 +673,7 @@ const UploadDocument = ({ caseId, open, onClose }: { caseId: string; open: boole
 const CaseDocuments = ({ caseId }: { caseId: string }) => {
   const documents = useDocuments(caseId)
   const [uploading, setUploading] = useState(false)
+  const [sharing, setSharing] = useState<DocumentRecord | null>(null)
   return (
     <>
       <div className="mb-4 flex justify-end">
@@ -667,7 +682,8 @@ const CaseDocuments = ({ caseId }: { caseId: string }) => {
           رفع مستند
         </Button>
       </div>
-      {documents.isPending ? <Loading /> : documents.isError ? <Failed error={documents.error} /> : documents.data.length === 0 ? <Empty>لا مستندات في هذه القضية بعد.</Empty> : <DocumentsTable rows={documents.data} />}
+      {documents.isPending ? <Loading /> : documents.isError ? <Failed error={documents.error} /> : documents.data.length === 0 ? <Empty>لا مستندات في هذه القضية بعد.</Empty> : <DocumentsTable rows={documents.data} onShare={setSharing} />}
+      <ShareDocument document={sharing} onClose={() => setSharing(null)} />
       <UploadDocument caseId={caseId} open={uploading} onClose={() => setUploading(false)} />
     </>
   )
@@ -689,6 +705,7 @@ const CaseFinance = ({ caseId }: { caseId: string }) => {
         <p className="text-sm text-ink-soft">الأتعاب ورسوم المحكمة والمصاريف المطالب بها في هذه القضية، وما دُفع منها.</p>
         {owner && <AddButton onClick={() => setBilling(true)}>مطالبة جديدة</AddButton>}
       </div>
+      {owner && <CaseProfit caseId={caseId} />}
       {invoices.isPending ? (
         <Loading />
       ) : invoices.isError ? (
@@ -768,8 +785,11 @@ export const CaseFile = () => {
         ))}
       </div>
       {tab === 'people' && <People caseId={caseId} />}
+      {tab === 'hearings' && <CaseHearings caseId={caseId} />}
+      {tab === 'notices' && <CaseNotices caseId={caseId} />}
       {tab === 'notes' && <Notes caseId={caseId} />}
       {tab === 'documents' && <CaseDocuments caseId={caseId} />}
+      {tab === 'powers' && <CasePowers caseId={caseId} />}
       {tab === 'tasks' && (caseTasks.length === 0 ? <Empty>لا مهام مرتبطة بهذه القضية.</Empty> : <TasksTable rows={caseTasks} />)}
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
@@ -1104,6 +1124,9 @@ export const Clients = () => {
                     </Link>
                   </>
                 )}
+                <Link to={`/office/powers-of-attorney?client=${client.client_id}`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
+                  التوكيلات
+                </Link>
                 <button type="button" onClick={() => setEditing(client)} className="text-xs font-semibold text-stamp-blue underline-offset-4 hover:underline">
                   فتح
                 </button>
@@ -1386,10 +1409,12 @@ export const Documents = () => {
   const [search, setSearch] = useState('')
   const documents = useDocuments(undefined, search)
   const cases = useCases()
+  const [sharing, setSharing] = useState<DocumentRecord | null>(null)
   return (
     <>
       <SheetHeader title="المستندات" note="كل مستندات القضايا التي تعمل عليها. الرفع يتم من داخل ملف القضية." action={<SearchBox onSearch={setSearch} placeholder="ابحث باسم الملف أو نوعه" />} />
-      {documents.isPending ? <Loading /> : documents.isError ? <Failed error={documents.error} /> : documents.data.length === 0 ? <Empty>لا مستندات مطابقة.</Empty> : <DocumentsTable rows={documents.data} cases={cases.data ?? []} />}
+      {documents.isPending ? <Loading /> : documents.isError ? <Failed error={documents.error} /> : documents.data.length === 0 ? <Empty>لا مستندات مطابقة.</Empty> : <DocumentsTable rows={documents.data} cases={cases.data ?? []} onShare={setSharing} />}
+      <ShareDocument document={sharing} onClose={() => setSharing(null)} />
     </>
   )
 }

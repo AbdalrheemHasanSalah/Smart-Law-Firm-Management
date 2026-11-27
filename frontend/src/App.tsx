@@ -4,10 +4,16 @@ import { GuestOnly, PATHS, Require } from './auth/auth'
 import { Forgot, Invitation, Login, LoginChooser, Onboarding, Register, ResetPassword } from './pages/Auth'
 import Landing from './pages/Landing'
 import { Today } from './pages/Office'
-import { CaseFile, Cases, Clients, Contracts, Documents, Tasks, Team } from './pages/Workspace'
+import { CaseFile, Cases, Clients, Contracts, Documents, Tasks } from './pages/Workspace'
+import { MyHr, TeamPage } from './pages/TeamHr'
+import { PublicOffice } from './pages/PublicOffice'
+import { Consultations, PublicPageSettings } from './pages/PublicPresence'
 import { Messages } from './pages/Messages'
 import { OfficeRequest, Platform } from './pages/OfficeRequests'
 import { Portal } from './pages/Others'
+import { PowersOfAttorney } from './pages/PowersOfAttorney'
+import { MyCustody } from './pages/FinanceOffice'
+import { Reports } from './pages/Reports'
 import { OfficeSubscription, PlatformSubscriptions } from './pages/Subscriptions'
 import { Activity } from './pages/Activity'
 import { Calendar } from './pages/Calendar'
@@ -29,6 +35,7 @@ export const App = () => (
   <BrowserRouter>
     <Routes>
       <Route path={PATHS.home} element={<Landing />} />
+      <Route path="/o/:slug" element={<PublicOffice />} />
       <Route path={PATHS.login} element={<GuestOnly><LoginChooser /></GuestOnly>} />
       <Route path="/login/:portal" element={<GuestOnly><Login /></GuestOnly>} />
       <Route path={PATHS.register} element={<Register />} />
@@ -44,13 +51,19 @@ export const App = () => (
       <Route path={`${PATHS.office}/tasks`} element={office(<Tasks />)} />
       <Route path={`${PATHS.office}/documents`} element={office(<Documents />)} />
       <Route path={`${PATHS.office}/contracts`} element={office(<Contracts />)} />
+      <Route path={`${PATHS.office}/powers-of-attorney`} element={office(<PowersOfAttorney />)} />
+      <Route path={`${PATHS.office}/custody`} element={office(<MyCustody />)} />
+      <Route path={`${PATHS.office}/reports`} element={office(<Reports />)} />
       <Route path={`${PATHS.office}/tools`} element={office(<Tools />)} />
       <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />
       <Route path={`${PATHS.office}/calendar`} element={office(<Calendar />)} />
       <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'])} />
       <Route path={`${PATHS.office}/clients/:clientId/statement`} element={office(<ClientStatement />, ['admin'])} />
       <Route path={`${PATHS.client}/statement`} element={<Require roles={['client']}><Shell><PortalStatement /></Shell></Require>} />
-      <Route path={`${PATHS.office}/team`} element={office(<Team />, ['admin'])} />
+      <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'])} />
+      <Route path={`${PATHS.office}/me`} element={office(<MyHr />)} />
+      <Route path={`${PATHS.office}/consultations`} element={office(<Consultations />)} />
+      <Route path={`${PATHS.office}/public-page`} element={office(<PublicPageSettings />, ['admin'])} />
 
       <Route path={`${PATHS.office}/messages`} element={office(<Messages />)} />
       <Route path={`${PATHS.client}/messages`} element={<Require roles={['client']}><Shell><Messages /></Shell></Require>} />

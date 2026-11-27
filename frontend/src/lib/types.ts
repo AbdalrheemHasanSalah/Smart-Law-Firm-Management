@@ -228,6 +228,8 @@ export type DocumentRecord = {
   access_level: 'restricted' | 'case_team' | 'authorized_users'
   created_at: string
   case_id: string
+  /** The client a shared document is shared with. */
+  client_id?: string | null
 }
 
 export type Contract = {

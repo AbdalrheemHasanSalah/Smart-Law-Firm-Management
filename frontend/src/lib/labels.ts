@@ -116,6 +116,13 @@ export const PARTY_ROLE: Record<string, string> = {
 }
 
 /** Turns `{ open: {text}, … }` into `[value, text]` pairs for a <SelectField>. */
+export const APPOINTMENT_TYPE: Record<string, string> = {
+  meeting: 'لقاء مع موكّل',
+  expert_session: 'جلسة خبرة',
+  court_visit: 'مراجعة محكمة',
+  other: 'موعد آخر',
+}
+
 export const optionsOf = (labels: Record<string, Label | string>) =>
   Object.entries(labels).map(([value, label]) => [value, typeof label === 'string' ? label : label.text] as const)
 

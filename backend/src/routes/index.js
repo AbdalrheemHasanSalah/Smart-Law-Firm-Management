@@ -16,9 +16,17 @@ import conflictRoutes from './conflictRoutes.js';
 import financeRoutes from './financeRoutes.js';
 import supportRoutes from './supportRoutes.js';
 import calendarRoutes from './calendarRoutes.js';
+import powerOfAttorneyRoutes from './powerOfAttorneyRoutes.js';
+import hearingRoutes from './hearingRoutes.js';
+import courtNoticeRoutes from './courtNoticeRoutes.js';
+import officeFinanceRoutes from './officeFinanceRoutes.js';
+import reportRoutes from './reportRoutes.js';
+import hrRoutes from './hrRoutes.js';
+import publicPageRoutes from './publicPageRoutes.js';
 
 const router = Router();
 
+router.use(publicPageRoutes);
 router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, subscriptionRoutes, conflictRoutes, supportRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseRoutes);
@@ -28,6 +36,12 @@ router.use('/tasks', taskRoutes);
 router.use('/users', userRoutes);
 router.use('/notes', caseNoteRoutes);
 router.use('/finance', financeRoutes);
+router.use('/finance', officeFinanceRoutes);
+router.use('/reports', reportRoutes);
+router.use('/hr', hrRoutes);
 router.use('/calendar', calendarRoutes);
+router.use('/powers-of-attorney', powerOfAttorneyRoutes);
+router.use('/hearings', hearingRoutes);
+router.use('/court-notices', courtNoticeRoutes);
 
 export default router;
