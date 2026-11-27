@@ -1108,6 +1108,33 @@ const routes: Route[] = [
     return { request: publicConsultation(row), client }
   }],
 
+  // sharing documents with clients, and a client's upcoming hearings
+  ['post', /^\/documents\/([^/]+)\/sharing$/, STAFF, ({ user, params, body }) => {
+    const row = documents.find((entry) => entry.document_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    caseFor(user, row.case_id)
+    if (body.shared) {
+      if (!involves.some((link) => link.case_id === row.case_id && link.client_id === body.client_id)) throw fail(400, 'VALIDATION')
+      Object.assign(row, { access_level: 'authorized_users', client_id: String(body.client_id) })
+    } else {
+      if (row.access_level !== 'authorized_users') throw fail(404, 'NOT_FOUND')
+      Object.assign(row, { access_level: 'case_team', client_id: null })
+    }
+    return { document: { document_id: row.document_id, case_id: row.case_id, client_id: row.client_id, access_level: row.access_level } }
+  }],
+  ['get', /^\/hearings\/mine$/, ['client'], ({ user }) => {
+    const mine = new Set(involves.filter((link) => link.client_id === user.client_id).map((link) => link.case_id))
+    const now = new Date().toISOString()
+    return {
+      hearings: hearings.filter((row) => mine.has(row.case_id) && row.status === 'scheduled' && row.hearing_at >= now)
+        .sort((a, b) => a.hearing_at.localeCompare(b.hearing_at))
+        .map((row) => {
+          const found = cases.find((entry) => entry.case_id === row.case_id)
+          return { hearing_id: row.hearing_id, hearing_at: row.hearing_at, hearing_type: row.hearing_type, court_room: row.court_room, court_name: row.court_name, case_id: row.case_id, case_number: found?.case_number ?? '', case_title: found?.title ?? '' }
+        }),
+    }
+  }],
+
   // powers of attorney
   ['get', /^\/powers-of-attorney\/lawyers$/, STAFF, () => ({
     lawyers: users.filter((user) => (user.role === 'admin' || user.role === 'lawyer') && user.status === 'active').map((user) => ({ user_id: user.user_id, full_name: user.full_name, role: user.role })),

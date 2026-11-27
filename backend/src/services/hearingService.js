@@ -202,3 +202,29 @@ export async function recordHearingOutcome(actor, hearingId, body) {
   });
   return saved;
 }
+
+/**
+ * A client's upcoming hearings, in the cases they are a party to: when, what kind, and where.
+ * The outcomes and notes the office records stay internal.
+ */
+export async function listClientUpcomingHearings(actor) {
+  if (!actor || actor.role !== 'client' || typeof actor.user_id !== 'string' || !UUID_PATTERN.test(actor.user_id)) {
+    throw new HearingServiceError(403, 'You do not have permission to access this resource.', 'FORBIDDEN');
+  }
+  const parameters = [actor.user_id];
+  const office = officeCondition(actor, parameters, 'h');
+  const result = await execute(
+    `SELECT h.hearing_id, h.hearing_at, h.hearing_type, h.court_room, co.name AS court_name,
+            lc.case_id, lc.case_number, lc.title AS case_title
+       FROM hearings h
+       JOIN legal_cases lc ON lc.case_id = h.case_id AND lc.office_id = h.office_id
+       LEFT JOIN courts co ON co.court_id = h.court_id
+      WHERE ${office} AND h.status = 'scheduled' AND h.hearing_at >= NOW()
+        AND EXISTS (SELECT 1 FROM involves party JOIN clients own ON own.client_id = party.client_id AND own.office_id = party.office_id
+                     WHERE party.case_id = h.case_id AND party.office_id = h.office_id AND own.user_id = $1)
+      ORDER BY h.hearing_at
+      LIMIT 50`,
+    parameters
+  );
+  return { hearings: result.rows };
+}

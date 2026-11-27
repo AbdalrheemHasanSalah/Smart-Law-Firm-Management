@@ -1552,5 +1552,18 @@
   "طلب استشارة جديد": "New consultation request",
   "وصل طلب استشارة جديد من صفحة المكتب العامة.": "A new consultation request arrived from the public office page.",
   "طلب استشارة لك": "A consultation request for you",
-  "أسند إليك مدير المكتب طلب استشارة من صفحة المكتب العامة.": "The office administrator assigned you a consultation request from the public page."
+  "أسند إليك مدير المكتب طلب استشارة من صفحة المكتب العامة.": "The office administrator assigned you a consultation request from the public page.",
+  "مشاركة المستند مع الموكّل": "Sharing the document with the client",
+  "مشاركة مع الموكّل": "Share with the client",
+  "الموكّل الذي يراه": "Client who sees it",
+  "لا موكّلين في هذه القضية": "No clients in this case",
+  "يظهر المستند في بوابة الموكّل ويصله إشعار بذلك. لا يرى الموكّلون الآخرون في القضية هذا المستند.": "The document appears in the client's portal and they are notified. Other clients in the case don't see it.",
+  "شارك": "Share",
+  "أوقف المشاركة": "Stop sharing",
+  "جلساتك القادمة": "Your upcoming hearings",
+  "· قضية": "· case",
+  "مستندات شاركها مكتبك معك": "Documents your office shared with you",
+  "المشاركة": "Sharing",
+  "شارك مع الموكّل": "Share with client",
+  "بعد يومين": "in 2 days"
 }

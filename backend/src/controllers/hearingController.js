@@ -1,4 +1,4 @@
-import { listCaseHearings, recordHearingOutcome } from '../services/hearingService.js';
+import { listCaseHearings, listClientUpcomingHearings, recordHearingOutcome } from '../services/hearingService.js';
 
 const handle = (work, status = 200) => async (request, response, next) => {
   try {
@@ -21,3 +21,4 @@ export const listCaseHearingsController = handle((request) => {
 export const recordHearingOutcomeController = handle(async (request) => ({
   hearing: await recordHearingOutcome(request.user, request.params.hearingId, request.body),
 }));
+export const listClientUpcomingHearingsController = handle((request) => listClientUpcomingHearings(request.user));

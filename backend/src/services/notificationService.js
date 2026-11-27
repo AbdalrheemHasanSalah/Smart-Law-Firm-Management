@@ -171,6 +171,13 @@ async function plan(event, payload, query) {
       }
       return messages;
     }
+    case 'case.document_shared': {
+      // Only the client it was shared with hears of it; the team already had the document.
+      const context = await caseContext();
+      if (!context) return [];
+      const shared = context.clients.filter((client) => client.client_id === payload.clientId);
+      return [forClients(shared, 'مستند جديد في قضيتك', `شارك مكتبك معك مستنداً في قضيتك ${context.label}.`, 'case_document')];
+    }
     case 'case.staff_assigned': {
       const context = await caseContext();
       if (!context) return [];
