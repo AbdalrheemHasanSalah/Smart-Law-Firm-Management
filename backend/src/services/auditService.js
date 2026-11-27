@@ -10,7 +10,7 @@ import { officeCondition } from './officeScope.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 25;
-const ENTITY_TYPES = new Set(['case', 'client', 'task', 'opponent', 'invoice', 'office', 'invitation', 'membership', 'subscription']);
+const ENTITY_TYPES = new Set(['case', 'client', 'task', 'opponent', 'invoice', 'office', 'invitation', 'membership', 'subscription', 'power_of_attorney']);
 
 export class AuditServiceError extends Error {
   constructor(status, message) {

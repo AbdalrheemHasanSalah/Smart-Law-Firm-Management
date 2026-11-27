@@ -16,6 +16,7 @@ import conflictRoutes from './conflictRoutes.js';
 import financeRoutes from './financeRoutes.js';
 import supportRoutes from './supportRoutes.js';
 import calendarRoutes from './calendarRoutes.js';
+import powerOfAttorneyRoutes from './powerOfAttorneyRoutes.js';
 
 const router = Router();
 
@@ -29,5 +30,6 @@ router.use('/users', userRoutes);
 router.use('/notes', caseNoteRoutes);
 router.use('/finance', financeRoutes);
 router.use('/calendar', calendarRoutes);
+router.use('/powers-of-attorney', powerOfAttorneyRoutes);
 
 export default router;

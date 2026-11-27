@@ -5,6 +5,7 @@ import { CASE_STATUS, CASE_TYPE, formatDate } from '@/lib/labels'
 import type { CaseNote, LegalCase } from '@/lib/types'
 import { cn, Stamp } from '@/ui/kit'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
+import { MyPowers } from './PowersOfAttorney'
 
 /* ───────────────────────── client portal ───────────────────────── */
 
@@ -73,6 +74,7 @@ export const Portal = () => {
           ))}
         </ul>
       )}
+      <MyPowers />
     </>
   )
 }

@@ -31,6 +31,7 @@ import { InvoicesTable, InvoiceTotals, NewInvoice, useInvoices } from '@/ui/Fina
 import { HearingPrepTab } from '@/ui/HearingPrep'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
+import { CasePowers } from './PowersOfAttorney'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -291,6 +292,7 @@ const TABS = [
   ['people', 'الأطراف والفريق'],
   ['notes', 'الملاحظات'],
   ['documents', 'المستندات'],
+  ['powers', 'التوكيلات'],
   ['tasks', 'المهام'],
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
@@ -770,6 +772,7 @@ export const CaseFile = () => {
       {tab === 'people' && <People caseId={caseId} />}
       {tab === 'notes' && <Notes caseId={caseId} />}
       {tab === 'documents' && <CaseDocuments caseId={caseId} />}
+      {tab === 'powers' && <CasePowers caseId={caseId} />}
       {tab === 'tasks' && (caseTasks.length === 0 ? <Empty>لا مهام مرتبطة بهذه القضية.</Empty> : <TasksTable rows={caseTasks} />)}
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
@@ -1104,6 +1107,9 @@ export const Clients = () => {
                     </Link>
                   </>
                 )}
+                <Link to={`/office/powers-of-attorney?client=${client.client_id}`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
+                  التوكيلات
+                </Link>
                 <button type="button" onClick={() => setEditing(client)} className="text-xs font-semibold text-stamp-blue underline-offset-4 hover:underline">
                   فتح
                 </button>

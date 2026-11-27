@@ -24,6 +24,7 @@ import type {
   Session,
   Task,
 } from './types'
+import type { PoaType, PowerOfAttorney } from './powersOfAttorney'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -211,6 +212,32 @@ const recordPayment = (officeId: string, amount: number, months: number, method:
     notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', read_at: null, created_at: payment.created_at })
   }
   return payment
+}
+
+/* ───────────── powers of attorney ───────────── */
+
+type DemoPower = Omit<PowerOfAttorney, 'state' | 'days_left' | 'expiring' | 'client_name' | 'lawyers' | 'cases'> & { lawyer_ids: string[]; case_ids: string[] }
+const dayOnly = (days: number) => daysFromNow(days).slice(0, 10)
+const powers: DemoPower[] = [
+  { poa_id: 'p-1', poa_number: 'و-2026/0412', poa_type: 'litigation', issuing_authority: 'كاتب العدل — نابلس', issued_on: dayOnly(-125), expires_on: dayOnly(18), scope: 'المرافعة والمدافعة أمام المحاكم بدرجاتها في دعوى المطالبة المالية.', status: 'active', revoked_at: null, has_scan: true, client_id: 'c-1', lawyer_ids: ['u-lawyer', 'u-owner'], case_ids: ['k-1'], created_at: daysFromNow(-125), updated_at: daysFromNow(-125) },
+  { poa_id: 'p-2', poa_number: 'و-2026/0518', poa_type: 'general', issuing_authority: 'كاتب العدل — رام الله', issued_on: dayOnly(-90), expires_on: null, scope: 'توكيل عام في إدارة شؤون الشركة القانونية.', status: 'active', revoked_at: null, has_scan: false, client_id: 'c-2', lawyer_ids: ['u-owner'], case_ids: ['k-2', 'k-5'], created_at: daysFromNow(-90), updated_at: daysFromNow(-90) },
+  { poa_id: 'p-3', poa_number: 'و-2025/1190', poa_type: 'special', issuing_authority: 'المحكمة الشرعية — جنين', issued_on: dayOnly(-400), expires_on: dayOnly(-20), scope: null, status: 'active', revoked_at: null, has_scan: true, client_id: 'c-3', lawyer_ids: ['u-lawyer'], case_ids: ['k-3'], created_at: daysFromNow(-400), updated_at: daysFromNow(-400) },
+]
+const nameOf = (userId: string) => users.find((user) => user.user_id === userId)?.full_name ?? '—'
+const publicPower = (row: DemoPower): PowerOfAttorney => {
+  const { lawyer_ids, case_ids, ...rest } = row
+  const today = dayOnly(0)
+  const daysLeft = row.expires_on ? Math.round((Date.parse(row.expires_on) - Date.parse(today)) / 86_400_000) : null
+  const state = row.status === 'revoked' ? 'revoked' : row.expires_on && row.expires_on < today ? 'expired' : 'active'
+  return {
+    ...rest,
+    state,
+    days_left: daysLeft,
+    expiring: state === 'active' && daysLeft !== null && daysLeft <= 30,
+    client_name: clients.find((client) => client.client_id === row.client_id)?.full_name_or_org ?? '—',
+    lawyers: lawyer_ids.map((user_id) => ({ user_id, full_name: nameOf(user_id) })),
+    cases: case_ids.map((case_id) => cases.find((entry) => entry.case_id === case_id)).filter((entry): entry is LegalCase => Boolean(entry)).map((entry) => ({ case_id: entry.case_id, case_number: entry.case_number, title: entry.title })),
+  }
 }
 
 /* ───────────── session ───────────── */
@@ -433,6 +460,43 @@ const routes: Route[] = [
     if (!contract) throw fail(404, 'NOT_FOUND')
     Object.assign(contract, body)
     return { contract }
+  }],
+
+  // powers of attorney
+  ['get', /^\/powers-of-attorney\/lawyers$/, STAFF, () => ({
+    lawyers: users.filter((user) => (user.role === 'admin' || user.role === 'lawyer') && user.status === 'active').map((user) => ({ user_id: user.user_id, full_name: user.full_name, role: user.role })),
+  })],
+  ['get', /^\/powers-of-attorney$/, ALL, ({ user, query }) => {
+    const mine = new Set(visibleCases(user).map((row) => row.case_id))
+    const visible = (row: DemoPower) =>
+      user.role === 'admin' || (user.role === 'client' ? row.client_id === user.client_id : row.lawyer_ids.includes(user.user_id) || involves.some((link) => link.client_id === row.client_id && mine.has(link.case_id)))
+    const rows = powers.filter(visible).map(publicPower).filter((row) =>
+      (!query.clientId || row.client_id === query.clientId) && (!query.caseId || row.cases.some((entry) => entry.case_id === query.caseId)) &&
+      (!query.state || (query.state === 'expiring' ? row.expiring : row.state === query.state)) && matches(query.search, row.poa_number, row.issuing_authority))
+    return paginate(rows, 'powers_of_attorney')
+  }],
+  ['post', /^\/powers-of-attorney$/, STAFF, ({ body }) => {
+    if (powers.some((row) => row.poa_number === String(body.poa_number).trim())) throw fail(409, 'POA_NUMBER_TAKEN')
+    if (!Array.isArray(body.lawyer_ids) || body.lawyer_ids.length === 0) throw fail(400, 'VALIDATION')
+    const now = new Date().toISOString()
+    const row: DemoPower = { poa_id: uid('p'), poa_number: String(body.poa_number).trim(), poa_type: body.poa_type as PoaType, issuing_authority: (body.issuing_authority as string) || null, issued_on: String(body.issued_on), expires_on: (body.expires_on as string) || null, scope: (body.scope as string) || null, status: 'active', revoked_at: null, has_scan: false, client_id: String(body.client_id), lawyer_ids: body.lawyer_ids as string[], case_ids: (body.case_ids as string[]) ?? [], created_at: now, updated_at: now }
+    powers.unshift(row)
+    return { power_of_attorney: publicPower(row) }
+  }],
+  ['patch', /^\/powers-of-attorney\/([^/]+)$/, STAFF, ({ user, params, body }) => {
+    const row = powers.find((entry) => entry.poa_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (body.status !== undefined && user.role === 'assistant') throw fail(403, 'FORBIDDEN')
+    if (body.poa_number && powers.some((entry) => entry !== row && entry.poa_number === String(body.poa_number).trim())) throw fail(409, 'POA_NUMBER_TAKEN')
+    Object.assign(row, body, { updated_at: new Date().toISOString() })
+    if (body.status !== undefined) row.revoked_at = body.status === 'revoked' ? new Date().toISOString() : null
+    return { power_of_attorney: publicPower(row) }
+  }],
+  ['put', /^\/powers-of-attorney\/([^/]+)\/scan$/, STAFF, ({ params }) => {
+    const row = powers.find((entry) => entry.poa_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    row.has_scan = true
+    return { poa_id: row.poa_id, has_scan: true }
   }],
 
   // team
