@@ -191,6 +191,22 @@ async function plan(event, payload, query) {
         path: '/office/tasks', button: 'افتح المهام',
       }];
     }
+    case 'consultation.received': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      return [{
+        people: audience([owner], actorUserId), officeId, type: 'consultation',
+        title: 'طلب استشارة جديد', body: 'وصل طلب استشارة جديد من صفحة المكتب العامة.',
+        path: '/office/consultations', button: 'افتح الطلبات',
+      }];
+    }
+    case 'consultation.assigned': {
+      const assignee = await rows(MEMBER_OF_OFFICE, [officeId, payload.userId]);
+      return [{
+        people: audience([assignee], actorUserId), officeId, type: 'consultation',
+        title: 'طلب استشارة لك', body: 'أسند إليك مدير المكتب طلب استشارة من صفحة المكتب العامة.',
+        path: '/office/consultations', button: 'افتح الطلبات',
+      }];
+    }
     case 'leave.requested': {
       const owner = await rows(OWNER_OF_OFFICE, [officeId]);
       return [{

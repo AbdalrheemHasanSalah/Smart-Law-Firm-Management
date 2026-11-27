@@ -22,6 +22,7 @@ export type StaffRecord = {
   monthly_salary: number | null
   salary_currency: Currency
   annual_leave_days: number
+  show_on_public_page: boolean
   has_record: boolean
   advances_owed: number
   annual_used: number
@@ -127,6 +128,7 @@ export type StaffRecordInput = {
   monthly_salary: number | null
   salary_currency: Currency
   annual_leave_days: number
+  show_on_public_page: boolean
 }
 
 export const useSaveStaffRecord = () =>

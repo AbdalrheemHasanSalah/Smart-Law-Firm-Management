@@ -87,6 +87,7 @@ const LeaveTable = ({ rows, actions, showName = true }: { rows: LeaveRequest[]; 
 const RecordForm = ({ record, onClose }: { record: StaffRecord | null; onClose: () => void }) => {
   const save = useSaveStaffRecord()
   const [values, setValues] = useState({ job_title: '', hire_date: '', phone: '', national_id: '', monthly_salary: '', salary_currency: 'ILS' as Currency, annual_leave_days: '14' })
+  const [listed, setListed] = useState(false)
   useEffect(() => {
     if (!record) return
     save.reset()
@@ -95,6 +96,7 @@ const RecordForm = ({ record, onClose }: { record: StaffRecord | null; onClose: 
       monthly_salary: record.monthly_salary === null ? '' : String(record.monthly_salary), salary_currency: record.salary_currency,
       annual_leave_days: String(record.annual_leave_days),
     })
+    setListed(record.show_on_public_page)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.user_id])
   const set = (key: keyof typeof values) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }))
@@ -111,7 +113,7 @@ const RecordForm = ({ record, onClose }: { record: StaffRecord | null; onClose: 
                 input: {
                   job_title: values.job_title.trim() || null, hire_date: values.hire_date || null, phone: values.phone.trim() || null,
                   national_id: values.national_id.trim() || null, monthly_salary: values.monthly_salary === '' ? null : Number(values.monthly_salary),
-                  salary_currency: values.salary_currency, annual_leave_days: days,
+                  salary_currency: values.salary_currency, annual_leave_days: days, show_on_public_page: listed,
                 },
               },
               { onSuccess: onClose },
@@ -126,6 +128,10 @@ const RecordForm = ({ record, onClose }: { record: StaffRecord | null; onClose: 
           <Field label="الراتب الشهري" name="monthly_salary" type="number" min="0" step="0.01" dir="ltr" value={values.monthly_salary} onChange={set('monthly_salary')} />
           <SelectField label="عملة الراتب" name="salary_currency" value={values.salary_currency} onChange={set('salary_currency')} options={optionsOf(CURRENCY)} />
           <Field label="الإجازة السنوية (أيام عمل)" name="annual_leave_days" type="number" min="0" max="60" step="1" dir="ltr" value={values.annual_leave_days} onChange={set('annual_leave_days')} hint="14 يوماً في قانون العمل، و21 بعد خمس سنوات." />
+          <label className="flex cursor-pointer items-center gap-2 self-end text-sm text-ink">
+            <input type="checkbox" checked={listed} onChange={(event) => setListed(event.target.checked)} className="size-4 accent-stamp" />
+            يظهر في صفحة المكتب العامة (الاسم والمسمّى فقط)
+          </label>
           <div className="sm:col-span-2">
             <FormActions error={save.isError ? messageOf(save.error) : null}>
               <Button variant="line" onClick={onClose}>إلغاء</Button>

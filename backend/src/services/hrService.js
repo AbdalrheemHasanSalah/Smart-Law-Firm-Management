@@ -68,7 +68,8 @@ const PROFILE_COLUMNS = (withId) => `
   m.user_id, u.full_name, u.email, r.role_name AS role, m.status AS membership_status,
   sp.job_title, to_char(sp.hire_date, 'YYYY-MM-DD') AS hire_date, sp.phone,
   ${withId ? 'sp.national_id,' : ''} sp.monthly_salary, COALESCE(sp.salary_currency, 'ILS') AS salary_currency,
-  COALESCE(sp.annual_leave_days, 14) AS annual_leave_days, (sp.user_id IS NOT NULL) AS has_record,
+  COALESCE(sp.annual_leave_days, 14) AS annual_leave_days, COALESCE(sp.show_on_public_page, FALSE) AS show_on_public_page,
+  (sp.user_id IS NOT NULL) AS has_record,
   ${OWED('m.office_id', 'm.user_id')} AS advances_owed,
   ${ANNUAL_USED('m.office_id', 'm.user_id', '$2::int', "'approved'")} AS annual_used,
   ${ANNUAL_USED('m.office_id', 'm.user_id', '$2::int', "'pending'")} AS annual_pending`;
@@ -99,7 +100,7 @@ export async function listStaff(actor) {
   return { staff: result.rows.map(publicProfile) };
 }
 
-const PROFILE_FIELDS = ['job_title', 'hire_date', 'phone', 'national_id', 'monthly_salary', 'salary_currency', 'annual_leave_days'];
+const PROFILE_FIELDS = ['job_title', 'hire_date', 'phone', 'national_id', 'monthly_salary', 'salary_currency', 'annual_leave_days', 'show_on_public_page'];
 
 /** Creates or updates a staff member's record. */
 export async function saveStaffProfile(actor, userId, body) {
@@ -115,8 +116,10 @@ export async function saveStaffProfile(actor, userId, body) {
       ? null : amount(body.monthly_salary, 'monthly_salary', { allowZero: true }),
     salary_currency: body.salary_currency ?? 'ILS',
     annual_leave_days: body.annual_leave_days ?? 14,
+    show_on_public_page: body.show_on_public_page ?? false,
   };
   if (!CURRENCIES.includes(values.salary_currency)) invalid('salary_currency must be ILS, JOD or USD.');
+  if (typeof values.show_on_public_page !== 'boolean') invalid('show_on_public_page must be true or false.');
   if (!Number.isInteger(values.annual_leave_days) || values.annual_leave_days < 0 || values.annual_leave_days > 60) {
     invalid('annual_leave_days must be a whole number from 0 to 60.');
   }
@@ -124,8 +127,8 @@ export async function saveStaffProfile(actor, userId, body) {
   const office = officeCondition(actor, parameters, 'm');
   // Only a staff member of this office has a record; the currency cannot change under open advances.
   const result = await execute(
-    `INSERT INTO staff_profiles (user_id, office_id, job_title, hire_date, phone, national_id, monthly_salary, salary_currency, annual_leave_days)
-     SELECT m.user_id, m.office_id, $2, $3::date, $4, $5, $6::numeric, $7, $8::int
+    `INSERT INTO staff_profiles (user_id, office_id, job_title, hire_date, phone, national_id, monthly_salary, salary_currency, annual_leave_days, show_on_public_page)
+     SELECT m.user_id, m.office_id, $2, $3::date, $4, $5, $6::numeric, $7, $8::int, $9::boolean
        FROM office_memberships m JOIN roles r ON r.role_id = m.role_id AND r.role_name IN ('admin', 'lawyer', 'assistant')
       WHERE m.user_id = $1 AND ${office}
         AND NOT EXISTS (SELECT 1 FROM staff_profiles old WHERE old.office_id = m.office_id AND old.user_id = m.user_id
@@ -133,7 +136,8 @@ export async function saveStaffProfile(actor, userId, body) {
      ON CONFLICT (office_id, user_id) DO UPDATE SET
        job_title = EXCLUDED.job_title, hire_date = EXCLUDED.hire_date, phone = EXCLUDED.phone,
        national_id = EXCLUDED.national_id, monthly_salary = EXCLUDED.monthly_salary,
-       salary_currency = EXCLUDED.salary_currency, annual_leave_days = EXCLUDED.annual_leave_days, updated_at = NOW()
+       salary_currency = EXCLUDED.salary_currency, annual_leave_days = EXCLUDED.annual_leave_days,
+       show_on_public_page = EXCLUDED.show_on_public_page, updated_at = NOW()
      RETURNING user_id`,
     parameters
   );

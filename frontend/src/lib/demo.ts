@@ -29,6 +29,7 @@ import type { HearingLogEntry } from './hearings'
 import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
 import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseCategory, FinanceAccount, LedgerEntry } from './officeFinance'
 import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './hr'
+import type { Consultation, PageSettings } from './publicPage'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -356,10 +357,10 @@ const leaveDays = (startsOn: string, endsOn: string) => {
   return days
 }
 
-type DemoProfile = Pick<StaffRecord, 'user_id' | 'job_title' | 'hire_date' | 'phone' | 'national_id' | 'monthly_salary' | 'salary_currency' | 'annual_leave_days'>
+type DemoProfile = Pick<StaffRecord, 'user_id' | 'job_title' | 'hire_date' | 'phone' | 'national_id' | 'monthly_salary' | 'salary_currency' | 'annual_leave_days'> & { show_on_public_page?: boolean }
 const profiles: DemoProfile[] = [
-  { user_id: 'u-owner', job_title: 'المحامي الرئيسي', hire_date: dayOnly(-2200), phone: '0599 100 200', national_id: '901234567', monthly_salary: null, salary_currency: 'ILS', annual_leave_days: 21 },
-  { user_id: 'u-lawyer', job_title: 'محامية', hire_date: dayOnly(-700), phone: '0599 300 400', national_id: '902345678', monthly_salary: 4500, salary_currency: 'ILS', annual_leave_days: 14 },
+  { user_id: 'u-owner', job_title: 'المحامي الرئيسي', hire_date: dayOnly(-2200), phone: '0599 100 200', national_id: '901234567', monthly_salary: null, salary_currency: 'ILS', annual_leave_days: 21, show_on_public_page: true },
+  { user_id: 'u-lawyer', job_title: 'محامية', hire_date: dayOnly(-700), phone: '0599 300 400', national_id: '902345678', monthly_salary: 4500, salary_currency: 'ILS', annual_leave_days: 14, show_on_public_page: true },
   { user_id: 'u-assistant', job_title: 'مساعدة قانونية', hire_date: dayOnly(-300), phone: '0568 500 600', national_id: '903456789', monthly_salary: 2800, salary_currency: 'ILS', annual_leave_days: 14 },
 ]
 const advances: (Omit<Advance, 'full_name' | 'account_name'> & { account_id: string })[] = [
@@ -387,7 +388,8 @@ const staffRecord = (user: DemoUser): StaffRecord => {
   return {
     user_id: user.user_id, full_name: user.full_name, email: user.email, role: user.role as StaffRecord['role'], membership_status: 'active',
     job_title: profile?.job_title ?? null, hire_date: profile?.hire_date ?? null, phone: profile?.phone ?? null, national_id: profile?.national_id ?? null,
-    monthly_salary: profile?.monthly_salary ?? null, salary_currency: profile?.salary_currency ?? 'ILS', annual_leave_days: entitlement, has_record: Boolean(profile),
+    monthly_salary: profile?.monthly_salary ?? null, salary_currency: profile?.salary_currency ?? 'ILS', annual_leave_days: entitlement,
+    show_on_public_page: profile?.show_on_public_page ?? false, has_record: Boolean(profile),
     advances_owed: owedBy(user.user_id), annual_used: used, annual_pending: annualTaken(user.user_id, ['pending']), annual_remaining: entitlement - used,
   }
 }
@@ -396,6 +398,34 @@ const publicPayslip = (row: (typeof payslips)[number]): Payslip => ({
 })
 const publicLeave = (row: (typeof leaveRequests)[number]): LeaveRequest => ({ ...row, full_name: nameOf(row.user_id), decided_by_name: row.status === 'approved' || row.status === 'rejected' ? nameOf('u-owner') : null })
 const staffUsers = () => users.filter((user) => user.role && user.role !== 'client')
+
+/* ───────────── public page and consultation requests ───────────── */
+
+let publicPageSettings: PageSettings | null = {
+  slug: 'khatib-law', is_published: true, tagline: 'محاماة واستشارات قانونية في نابلس منذ 2012',
+  about: 'مكتب محاماة يتابع القضايا المدنية والتجارية وقضايا الأحوال الشخصية والعمل أمام محاكم الضفة الغربية، ويقدّم الاستشارات للأفراد والشركات.',
+  practice_areas: ['مدني', 'تجاري', 'أحوال شخصية', 'عمالي', 'عقود وشركات'], whatsapp: '+970 599 100 200',
+  working_hours: 'السبت–الخميس، 8:30–16:00', map_url: 'https://www.openstreetmap.org/#map=16/32.2211/35.2544', has_logo: false,
+}
+const consultations: Omit<Consultation, 'assigned_to_name' | 'client_name'>[] = [
+  { request_id: 'cr-1', full_name: 'سلمى عبد الهادي', phone: '0599 765 432', email: 'salma@mail.ps', case_type: 'family', message: 'أحتاج استشارة بخصوص حضانة طفلين بعد الطلاق ونفقتهما.', preferred_time: 'بعد الرابعة عصراً', status: 'new', notes: null, assigned_to_user_id: null, client_id: null, created_at: minutesAgo(90) },
+  { request_id: 'cr-2', full_name: 'محمد عودة', phone: '0568 112 233', email: null, case_type: 'labor', message: 'فُصلت من عملي دون إنذار بعد ثماني سنوات، وأريد معرفة حقوقي.', preferred_time: null, status: 'contacted', notes: 'اتصلنا به وحدّدنا موعداً الأحد.', assigned_to_user_id: 'u-lawyer', client_id: null, created_at: minutesAgo(60 * 26) },
+]
+const publicConsultation = (row: (typeof consultations)[number]): Consultation => ({
+  ...row,
+  assigned_to_name: row.assigned_to_user_id ? nameOf(row.assigned_to_user_id) : null,
+  client_name: clients.find((client) => client.client_id === row.client_id)?.full_name_or_org ?? null,
+})
+/** The published page as visitors see it, or null. */
+const publishedPage = (slug: string) => {
+  if (!publicPageSettings?.is_published || publicPageSettings.slug !== slug) return null
+  const { is_published: _published, ...page } = publicPageSettings
+  return {
+    ...page,
+    office: { name: 'مكتب الخطيب للمحاماة', phone: '09 238 4455', email: 'info@khatib-law.ps', city: 'نابلس', address: 'نابلس — شارع رفيديا، عمارة الصالح، الطابق الثالث' },
+    lawyers: profiles.filter((profile) => profile.show_on_public_page).map((profile) => ({ full_name: nameOf(profile.user_id), job_title: profile.job_title })),
+  }
+}
 
 /* ───────────── session ───────────── */
 
@@ -961,7 +991,7 @@ const routes: Route[] = [
   ['put', /^\/hr\/staff\/([^/]+)$/, ['admin'], ({ params, body }) => {
     const user = staffUsers().find((entry) => entry.user_id === params[0])
     if (!user) throw fail(400, 'VALIDATION')
-    const record: DemoProfile = { user_id: user.user_id, job_title: (body.job_title as string) ?? null, hire_date: (body.hire_date as string) ?? null, phone: (body.phone as string) ?? null, national_id: (body.national_id as string) ?? null, monthly_salary: (body.monthly_salary as number | null) ?? null, salary_currency: (body.salary_currency as MoneyCurrency) ?? 'ILS', annual_leave_days: Number(body.annual_leave_days ?? 14) }
+    const record: DemoProfile = { user_id: user.user_id, job_title: (body.job_title as string) ?? null, hire_date: (body.hire_date as string) ?? null, phone: (body.phone as string) ?? null, national_id: (body.national_id as string) ?? null, monthly_salary: (body.monthly_salary as number | null) ?? null, salary_currency: (body.salary_currency as MoneyCurrency) ?? 'ILS', annual_leave_days: Number(body.annual_leave_days ?? 14), show_on_public_page: Boolean(body.show_on_public_page) }
     const index = profiles.findIndex((row) => row.user_id === user.user_id)
     if (index >= 0) profiles[index] = record
     else profiles.push(record)
@@ -1044,6 +1074,38 @@ const routes: Route[] = [
     if (!row || !(row.status === 'pending' && (user.role === 'admin' || row.user_id === user.user_id)) && !(user.role === 'admin' && row.status === 'approved' && row.starts_on > dayOnly(0))) throw fail(409, 'LEAVE_DECIDED')
     row.status = 'cancelled'
     return { leave_id: row.leave_id, status: 'cancelled' }
+  }],
+
+  // public page settings and consultation requests
+  ['get', /^\/offices\/current\/public-page$/, ['admin'], () => ({ page: publicPageSettings })],
+  ['put', /^\/offices\/current\/public-page$/, ['admin'], ({ body }) => {
+    if (body.slug === 'admin') throw fail(409, 'SLUG_TAKEN')
+    publicPageSettings = { ...(body as unknown as Omit<PageSettings, 'has_logo'>), has_logo: publicPageSettings?.has_logo ?? false }
+    return { page: publicPageSettings }
+  }],
+  ['put', /^\/offices\/current\/public-page\/logo$/, ['admin'], () => {
+    if (publicPageSettings) publicPageSettings.has_logo = true
+    return { has_logo: true }
+  }],
+  ['get', /^\/consultations$/, STAFF, ({ user, query }) => ({
+    requests: consultations.filter((row) => (user.role === 'admin' || row.assigned_to_user_id === user.user_id) && (!query.status || row.status === query.status))
+      .sort((a, b) => Number(b.status === 'new') - Number(a.status === 'new') || b.created_at.localeCompare(a.created_at)).map(publicConsultation),
+  })],
+  ['patch', /^\/consultations\/([^/]+)$/, STAFF, ({ user, params, body }) => {
+    const row = consultations.find((entry) => entry.request_id === params[0] && (user.role === 'admin' || entry.assigned_to_user_id === user.user_id))
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.status === 'converted') throw fail(409, 'REQUEST_CONVERTED')
+    if (body.assigned_to_user_id !== undefined && user.role !== 'admin') throw fail(403, 'FORBIDDEN')
+    Object.assign(row, body)
+    return { request: publicConsultation(row) }
+  }],
+  ['post', /^\/consultations\/([^/]+)\/convert$/, ['admin'], ({ params, body }) => {
+    const row = consultations.find((entry) => entry.request_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.status === 'converted') throw fail(409, 'REQUEST_CONVERTED')
+    const client = demoClient({ client_type: body.client_type ?? 'individual', full_name_or_org: row.full_name, phone: row.phone, email: row.email })
+    Object.assign(row, { status: 'converted', client_id: client.client_id })
+    return { request: publicConsultation(row), client }
   }],
 
   // powers of attorney
@@ -1238,6 +1300,18 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
   const invitePath = path.startsWith('/invitations/')
   if (method === 'get' && invitePath) {
     return { invitation: { office_name: 'مكتب الخطيب للمحاماة', office_active: true, role: 'lawyer', email_hint: 'n***@mail.ps', state: 'pending', expires_at: daysFromNow(5) } }
+  }
+  const publicPath = /^\/public\/offices\/([^/]+)(\/consultations)?$/.exec(path)
+  if (publicPath) {
+    const page = publishedPage(publicPath[1]!)
+    if (!page) throw fail(404, 'NOT_FOUND')
+    if (method === 'get' && !publicPath[2]) return { page }
+    if (method === 'post' && publicPath[2]) {
+      if (!body.website && Date.now() - Number(body.opened_at) >= 3000) {
+        consultations.unshift({ request_id: uid('cr'), full_name: String(body.full_name), phone: String(body.phone), email: (body.email as string) || null, case_type: (body.case_type as string) || null, message: String(body.message), preferred_time: (body.preferred_time as string) || null, status: 'new', notes: null, assigned_to_user_id: null, client_id: null, created_at: new Date().toISOString() })
+      }
+      return { received: true }
+    }
   }
   const user = currentUser()
   if (!user) throw fail(401, 'UNAUTHORIZED')

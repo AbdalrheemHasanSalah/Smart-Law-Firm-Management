@@ -641,6 +641,8 @@ CREATE TABLE IF NOT EXISTS staff_profiles (
     monthly_salary NUMERIC(12, 2) CHECK (monthly_salary >= 0),
     salary_currency CHAR(3) NOT NULL DEFAULT 'ILS' CHECK (salary_currency IN ('ILS', 'JOD', 'USD')),
     annual_leave_days INTEGER NOT NULL DEFAULT 14 CHECK (annual_leave_days BETWEEN 0 AND 60),
+    -- Listed (name and job title only) on the office's public page.
+    show_on_public_page BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (office_id, user_id),
     FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
@@ -714,6 +716,44 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     CONSTRAINT leave_requests_decided_check CHECK (
         (status IN ('approved', 'rejected')) = (decided_at IS NOT NULL)
     )
+);
+
+CREATE TABLE IF NOT EXISTS office_public_pages (
+    office_id UUID PRIMARY KEY REFERENCES law_offices(office_id),
+    -- Lower-case Latin letters, digits and single hyphens, unique across the platform.
+    slug VARCHAR(60) NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+    is_published BOOLEAN NOT NULL DEFAULT FALSE,
+    tagline VARCHAR(200),
+    about TEXT,
+    practice_areas TEXT[] NOT NULL DEFAULT '{}',
+    whatsapp VARCHAR(30),
+    working_hours VARCHAR(300),
+    map_url VARCHAR(500) CHECK (map_url IS NULL OR map_url ~ '^https://'),
+    logo_key TEXT UNIQUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS consultation_requests (
+    request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    full_name VARCHAR(150) NOT NULL,
+    phone VARCHAR(30) NOT NULL,
+    email VARCHAR(254),
+    case_type VARCHAR(50),
+    message TEXT NOT NULL,
+    preferred_time VARCHAR(200),
+    status VARCHAR(20) NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new', 'contacted', 'converted', 'rejected')),
+    assigned_to_user_id UUID,
+    client_id UUID,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT consultation_requests_assignee_fkey FOREIGN KEY (office_id, assigned_to_user_id)
+        REFERENCES office_memberships(office_id, user_id),
+    CONSTRAINT consultation_requests_client_fkey FOREIGN KEY (office_id, client_id)
+        REFERENCES clients(office_id, client_id),
+    CONSTRAINT consultation_requests_converted_check CHECK ((status = 'converted') = (client_id IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS account_transfers (
@@ -891,3 +931,6 @@ CREATE INDEX IF NOT EXISTS idx_payslips_office_period ON payslips(office_id, per
 CREATE INDEX IF NOT EXISTS idx_leave_requests_member ON leave_requests(office_id, user_id, starts_on DESC);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_office_dates ON leave_requests(office_id, starts_on, ends_on)
     WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_consultation_requests_office ON consultation_requests(office_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultation_requests_assignee ON consultation_requests(assigned_to_user_id)
+    WHERE assigned_to_user_id IS NOT NULL;

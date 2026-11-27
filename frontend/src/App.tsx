@@ -6,6 +6,8 @@ import Landing from './pages/Landing'
 import { Today } from './pages/Office'
 import { CaseFile, Cases, Clients, Contracts, Documents, Tasks } from './pages/Workspace'
 import { MyHr, TeamPage } from './pages/TeamHr'
+import { PublicOffice } from './pages/PublicOffice'
+import { Consultations, PublicPageSettings } from './pages/PublicPresence'
 import { Messages } from './pages/Messages'
 import { OfficeRequest, Platform } from './pages/OfficeRequests'
 import { Portal } from './pages/Others'
@@ -33,6 +35,7 @@ export const App = () => (
   <BrowserRouter>
     <Routes>
       <Route path={PATHS.home} element={<Landing />} />
+      <Route path="/o/:slug" element={<PublicOffice />} />
       <Route path={PATHS.login} element={<GuestOnly><LoginChooser /></GuestOnly>} />
       <Route path="/login/:portal" element={<GuestOnly><Login /></GuestOnly>} />
       <Route path={PATHS.register} element={<Register />} />
@@ -59,6 +62,8 @@ export const App = () => (
       <Route path={`${PATHS.client}/statement`} element={<Require roles={['client']}><Shell><PortalStatement /></Shell></Require>} />
       <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'])} />
       <Route path={`${PATHS.office}/me`} element={office(<MyHr />)} />
+      <Route path={`${PATHS.office}/consultations`} element={office(<Consultations />)} />
+      <Route path={`${PATHS.office}/public-page`} element={office(<PublicPageSettings />, ['admin'])} />
 
       <Route path={`${PATHS.office}/messages`} element={office(<Messages />)} />
       <Route path={`${PATHS.client}/messages`} element={<Require roles={['client']}><Shell><Messages /></Shell></Require>} />

@@ -22,9 +22,11 @@ import courtNoticeRoutes from './courtNoticeRoutes.js';
 import officeFinanceRoutes from './officeFinanceRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import hrRoutes from './hrRoutes.js';
+import publicPageRoutes from './publicPageRoutes.js';
 
 const router = Router();
 
+router.use(publicPageRoutes);
 router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, subscriptionRoutes, conflictRoutes, supportRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseRoutes);
