@@ -32,6 +32,7 @@ import { HearingPrepTab } from '@/ui/HearingPrep'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
+import { CaseHearings, CaseNotices } from './CaseSessions'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -290,6 +291,8 @@ export const Cases = () => {
 
 const TABS = [
   ['people', 'الأطراف والفريق'],
+  ['hearings', 'الجلسات'],
+  ['notices', 'أوراق المحضرين'],
   ['notes', 'الملاحظات'],
   ['documents', 'المستندات'],
   ['powers', 'التوكيلات'],
@@ -770,6 +773,8 @@ export const CaseFile = () => {
         ))}
       </div>
       {tab === 'people' && <People caseId={caseId} />}
+      {tab === 'hearings' && <CaseHearings caseId={caseId} />}
+      {tab === 'notices' && <CaseNotices caseId={caseId} />}
       {tab === 'notes' && <Notes caseId={caseId} />}
       {tab === 'documents' && <CaseDocuments caseId={caseId} />}
       {tab === 'powers' && <CasePowers caseId={caseId} />}

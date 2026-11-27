@@ -304,14 +304,19 @@ CREATE TABLE IF NOT EXISTS appointments (
     purpose TEXT NOT NULL,
     location TEXT,
     external_party_name VARCHAR(200),
-    client_id UUID NOT NULL REFERENCES clients(client_id),
+    appointment_type VARCHAR(20) NOT NULL DEFAULT 'meeting'
+        CONSTRAINT appointments_type_check
+        CHECK (appointment_type IN ('meeting', 'expert_session', 'court_visit', 'other')),
+    -- A client meeting needs a client; other appointments may have none.
+    client_id UUID REFERENCES clients(client_id),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     case_id UUID REFERENCES legal_cases(case_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
     FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
     FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id),
     FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
-    CHECK (ends_at > starts_at)
+    CHECK (ends_at > starts_at),
+    CONSTRAINT appointments_meeting_client_check CHECK (appointment_type <> 'meeting' OR client_id IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS hearings (
@@ -323,10 +328,19 @@ CREATE TABLE IF NOT EXISTS hearings (
     status VARCHAR(30) NOT NULL DEFAULT 'scheduled'
         CHECK (status IN ('scheduled', 'completed', 'postponed', 'cancelled')),
     notes TEXT,
+    -- The outcome as recorded after the session: who attended, why it was postponed, and the
+    -- hearing it was postponed to.
+    attended_by_user_id UUID,
+    postponement_reason TEXT,
+    next_hearing_id UUID REFERENCES hearings(hearing_id) ON DELETE SET NULL,
+    outcome_recorded_at TIMESTAMPTZ,
+    outcome_recorded_by_user_id UUID REFERENCES app_users(user_id),
     case_id UUID NOT NULL REFERENCES legal_cases(case_id),
     court_id UUID REFERENCES courts(court_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
-    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id)
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id),
+    CONSTRAINT hearings_attended_by_member_fkey FOREIGN KEY (office_id, attended_by_user_id)
+        REFERENCES office_memberships(office_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -459,6 +473,29 @@ CREATE TABLE IF NOT EXISTS power_of_attorney_cases (
     PRIMARY KEY (poa_id, case_id),
     FOREIGN KEY (office_id, poa_id) REFERENCES powers_of_attorney(office_id, poa_id) ON DELETE CASCADE,
     FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS court_notices (
+    notice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    notice_type VARCHAR(20) NOT NULL
+        CHECK (notice_type IN ('notification', 'summons', 'judgment_service', 'execution')),
+    recipient VARCHAR(200),
+    bailiff_office VARCHAR(200),
+    sent_on DATE NOT NULL,
+    delivery_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (delivery_status IN ('pending', 'delivered', 'returned', 'refused')),
+    delivered_on DATE,
+    notes TEXT,
+    attachment_key TEXT UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    case_id UUID NOT NULL,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    CONSTRAINT court_notices_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id),
+    CONSTRAINT court_notices_dates_check CHECK (delivered_on IS NULL OR delivered_on >= sent_on),
+    CONSTRAINT court_notices_delivered_check CHECK (delivery_status = 'pending' OR delivered_on IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
@@ -644,3 +681,6 @@ CREATE INDEX IF NOT EXISTS idx_powers_of_attorney_office_expiry ON powers_of_att
     WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_power_of_attorney_lawyers_user ON power_of_attorney_lawyers(user_id);
 CREATE INDEX IF NOT EXISTS idx_power_of_attorney_cases_case ON power_of_attorney_cases(case_id);
+CREATE INDEX IF NOT EXISTS idx_hearings_office_date ON hearings(office_id, hearing_at);
+CREATE INDEX IF NOT EXISTS idx_court_notices_case ON court_notices(case_id, sent_on DESC);
+CREATE INDEX IF NOT EXISTS idx_court_notices_office_sent ON court_notices(office_id, sent_on);

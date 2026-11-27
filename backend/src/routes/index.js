@@ -17,6 +17,8 @@ import financeRoutes from './financeRoutes.js';
 import supportRoutes from './supportRoutes.js';
 import calendarRoutes from './calendarRoutes.js';
 import powerOfAttorneyRoutes from './powerOfAttorneyRoutes.js';
+import hearingRoutes from './hearingRoutes.js';
+import courtNoticeRoutes from './courtNoticeRoutes.js';
 
 const router = Router();
 
@@ -31,5 +33,7 @@ router.use('/notes', caseNoteRoutes);
 router.use('/finance', financeRoutes);
 router.use('/calendar', calendarRoutes);
 router.use('/powers-of-attorney', powerOfAttorneyRoutes);
+router.use('/hearings', hearingRoutes);
+router.use('/court-notices', courtNoticeRoutes);
 
 export default router;

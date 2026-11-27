@@ -3,8 +3,10 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { PATHS } from '@/auth/auth'
 import { api } from '@/lib/api'
-import { CASE_STATUS, CASE_TYPE, formatDate, formatMoney, formatTime, INVOICE_STATE, PRIORITY, ROLE, TASK_STATUS } from '@/lib/labels'
+import { APPOINTMENT_TYPE, CASE_STATUS, CASE_TYPE, formatDate, formatMoney, formatTime, INVOICE_STATE, PRIORITY, ROLE, TASK_STATUS } from '@/lib/labels'
 import { POA_TYPE } from '@/lib/powersOfAttorney'
+import { DELIVERY_STATUS, NOTICE_TYPE } from '@/lib/courtNotices'
+import { HEARING_STATUS } from '@/lib/hearings'
 import type { AuditEntry } from '@/lib/types'
 import { Button, cn } from '@/ui/kit'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
@@ -33,6 +35,11 @@ const ACTION: Record<string, string> = {
   subscription_payment_recorded: 'سجّل دفعة اشتراك',
   subscription_paid_online: 'دفع الاشتراك إلكترونياً',
   poa_created: 'سجّل توكيلاً',
+  hearing_held: 'سجّل نتيجة جلسة',
+  hearing_postponed: 'سجّل تأجيل جلسة',
+  hearing_cancelled: 'سجّل إلغاء جلسة',
+  court_notice_recorded: 'سجّل ورقة محضر',
+  court_notice_updated: 'حدّث ورقة محضر',
   poa_updated: 'عدّل توكيلاً',
   poa_revoked: 'ألغى توكيلاً',
   poa_scan_attached: 'أرفق صورة توكيل',
@@ -68,6 +75,16 @@ const FIELD: Record<string, string> = {
   case_id: 'القضية',
   assigned_to_name: 'المسؤول',
   poa_number: 'رقم التوكيل',
+  outcome: 'النتيجة',
+  postponement_reason: 'سبب التأجيل',
+  notice_type: 'نوع الورقة',
+  recipient: 'المبلَّغ إليه',
+  bailiff_office: 'دائرة المحضرين',
+  sent_on: 'تاريخ الإرسال',
+  delivery_status: 'حالة التبليغ',
+  delivered_on: 'تاريخ التبليغ',
+  notes: 'ملاحظات',
+  appointment_type: 'نوع الموعد',
   poa_type: 'نوع التوكيل',
   issuing_authority: 'جهة الإصدار',
   issued_on: 'تاريخ الإصدار',
@@ -96,6 +113,10 @@ const readable = (field: string, value: unknown, entityType: string): string => 
   if (typeof value === 'string') {
     if (entityType === 'power_of_attorney' && field === 'status') return value === 'revoked' ? 'ملغى' : 'ساري'
     if (field === 'poa_type') return POA_TYPE[value as keyof typeof POA_TYPE] ?? value
+    if (field === 'notice_type') return NOTICE_TYPE[value as keyof typeof NOTICE_TYPE] ?? value
+    if (field === 'delivery_status') return DELIVERY_STATUS[value as keyof typeof DELIVERY_STATUS]?.text ?? value
+    if (field === 'appointment_type') return APPOINTMENT_TYPE[value] ?? value
+    if (field === 'status' && entityType === 'case' && !CASE_STATUS[value]) return HEARING_STATUS[value as keyof typeof HEARING_STATUS]?.text ?? value
     if (field === 'status') return (entityType === 'task' ? TASK_STATUS : entityType === 'invoice' ? INVOICE_STATE : CASE_STATUS)[value]?.text ?? value
     if (field === 'priority') return PRIORITY[value]?.text ?? value
     if (field === 'case_type') return CASE_TYPE[value] ?? value

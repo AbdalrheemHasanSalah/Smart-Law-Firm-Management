@@ -25,6 +25,8 @@ import type {
   Task,
 } from './types'
 import type { PoaType, PowerOfAttorney } from './powersOfAttorney'
+import type { HearingLogEntry } from './hearings'
+import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -238,6 +240,46 @@ const publicPower = (row: DemoPower): PowerOfAttorney => {
     lawyers: lawyer_ids.map((user_id) => ({ user_id, full_name: nameOf(user_id) })),
     cases: case_ids.map((case_id) => cases.find((entry) => entry.case_id === case_id)).filter((entry): entry is LegalCase => Boolean(entry)).map((entry) => ({ case_id: entry.case_id, case_number: entry.case_number, title: entry.title })),
   }
+}
+
+/* ───────────── hearings, appointments and court notices ───────────── */
+
+type DemoHearing = Omit<HearingLogEntry, 'attended_by_name' | 'outcome_recorded_by_name' | 'next_hearing_at'>
+const hearing = (id: string, caseId: string, days: number, hour: number, type: string, extra: Partial<DemoHearing> = {}): DemoHearing => ({
+  hearing_id: id, hearing_at: daysFromNow(days, hour), hearing_type: type, court_room: '3', court_name: 'صلح نابلس', status: 'scheduled',
+  outcome: null, notes: null, postponement_reason: null, next_hearing_id: null, attended_by_user_id: null, outcome_recorded_at: null, case_id: caseId, ...extra,
+})
+const hearings: DemoHearing[] = [
+  hearing('h-1', 'k-1', -40, 9, 'أولى', { status: 'postponed', outcome: 'حضر الطرفان وطلب الخصم مهلة للرد.', postponement_reason: 'مهلة للخصم لتقديم لائحة جوابية', next_hearing_id: 'h-2', attended_by_user_id: 'u-lawyer', outcome_recorded_at: daysFromNow(-40, 12) }),
+  hearing('h-2', 'k-1', -5, 10, 'تقديم بيّنات', { status: 'postponed', outcome: 'قُدّمت البيّنات الخطية وأُرفق عقد المقاولة.', postponement_reason: 'سماع الشهود', next_hearing_id: 'h-3', attended_by_user_id: 'u-lawyer', outcome_recorded_at: daysFromNow(-5, 13) }),
+  hearing('h-3', 'k-1', 2, 9, 'سماع شهود'),
+  hearing('h-4', 'k-3', -1, 11, 'مرافعة', { court_name: 'الشرعية — جنين', court_room: null }),
+  hearing('h-5', 'k-2', 6, 10, 'أولى', { court_name: 'بداية رام الله' }),
+  hearing('h-6', 'k-4', 0, 12, 'خبرة', { court_name: 'صلح طوباس' }),
+]
+const publicHearing = (row: DemoHearing): HearingLogEntry => ({
+  ...row,
+  attended_by_name: row.attended_by_user_id ? nameOf(row.attended_by_user_id) : null,
+  outcome_recorded_by_name: row.outcome_recorded_at ? nameOf('u-owner') : null,
+  next_hearing_at: hearings.find((entry) => entry.hearing_id === row.next_hearing_id)?.hearing_at ?? null,
+})
+
+type DemoAppointment = { appointment_id: string; starts_at: string; ends_at: string; status: string; purpose: string; location: string | null; appointment_type: string; client_id: string | null; user_id: string; case_id: string | null }
+const appointments: DemoAppointment[] = [
+  { appointment_id: 'a-1', starts_at: daysFromNow(1, 11), ends_at: daysFromNow(1, 12), status: 'confirmed', purpose: 'مراجعة شهادة الشهود', location: 'المكتب', appointment_type: 'meeting', client_id: 'c-1', user_id: 'u-lawyer', case_id: 'k-1' },
+  { appointment_id: 'a-2', starts_at: daysFromNow(3, 9), ends_at: daysFromNow(3, 11), status: 'scheduled', purpose: 'كشف حسّي مع الخبير على المأجور', location: 'طوباس', appointment_type: 'expert_session', client_id: null, user_id: 'u-lawyer', case_id: 'k-4' },
+  { appointment_id: 'a-3', starts_at: daysFromNow(0, 13), ends_at: daysFromNow(0, 14), status: 'scheduled', purpose: 'مراجعة قلم المحكمة لتصوير الملف', location: 'محكمة بداية رام الله', appointment_type: 'court_visit', client_id: null, user_id: 'u-assistant', case_id: 'k-2' },
+]
+
+type DemoNotice = Omit<CourtNotice, 'case_number' | 'case_title' | 'created_by_name'>
+const notices: DemoNotice[] = [
+  { notice_id: 'cn-1', notice_type: 'summons', recipient: 'شركة البناء الحديث', bailiff_office: 'محضرو محكمة صلح نابلس', sent_on: dayOnly(-12), delivery_status: 'delivered', delivered_on: dayOnly(-8), notes: null, has_attachment: true, case_id: 'k-1', created_at: daysFromNow(-12), updated_at: daysFromNow(-8) },
+  { notice_id: 'cn-2', notice_type: 'notification', recipient: 'الشاهد أحمد سليم', bailiff_office: 'محضرو محكمة صلح نابلس', sent_on: dayOnly(-3), delivery_status: 'pending', delivered_on: null, notes: 'العنوان في رفيديا قرب المدرسة.', has_attachment: false, case_id: 'k-1', created_at: daysFromNow(-3), updated_at: daysFromNow(-3) },
+  { notice_id: 'cn-3', notice_type: 'notification', recipient: 'المستأجر', bailiff_office: 'محضرو محكمة صلح طوباس', sent_on: dayOnly(-20), delivery_status: 'returned', delivered_on: dayOnly(-14), notes: 'لم يُعثر على المبلَّغ في العنوان.', has_attachment: false, case_id: 'k-4', created_at: daysFromNow(-20), updated_at: daysFromNow(-14) },
+]
+const publicNotice = (row: DemoNotice): CourtNotice => {
+  const found = cases.find((entry) => entry.case_id === row.case_id)
+  return { ...row, case_number: found?.case_number ?? '—', case_title: found?.title ?? '—', created_by_name: nameOf('u-owner') }
 }
 
 /* ───────────── session ───────────── */
@@ -460,6 +502,108 @@ const routes: Route[] = [
     if (!contract) throw fail(404, 'NOT_FOUND')
     Object.assign(contract, body)
     return { contract }
+  }],
+
+  // calendar, hearings and court notices
+  ['get', /^\/calendar$/, STAFF, ({ user, query }) => {
+    const focus = user.role === 'admin' && typeof query.userId === 'string' ? users.find((entry) => entry.user_id === query.userId) : null
+    const viewer = focus ?? user
+    const mine = new Set(visibleCases(viewer).map((row) => row.case_id))
+    const whole = user.role === 'admin' && !focus
+    const from = Date.parse(`${String(query.from)}T00:00:00`) - 86_400_000
+    const to = Date.parse(`${String(query.to)}T00:00:00`) + 2 * 86_400_000
+    const inRange = (at: string) => Date.parse(at) >= from && Date.parse(at) < to
+    const caseNumber = (caseId: string | null) => cases.find((entry) => entry.case_id === caseId)?.case_number ?? null
+    const events = [
+      ...hearings.filter((row) => inRange(row.hearing_at) && (whole || mine.has(row.case_id) || row.attended_by_user_id === viewer.user_id)).map((row) => ({
+        kind: 'hearing', id: row.hearing_id, at: row.hearing_at, status: row.status, title: `جلسة ${row.hearing_type}`, case_id: row.case_id, case_number: caseNumber(row.case_id),
+        details: { case_title: cases.find((entry) => entry.case_id === row.case_id)?.title ?? null, court_name: row.court_name, court_room: row.court_room, outcome: row.outcome, notes: row.notes, hearing_type: row.hearing_type },
+      })),
+      ...appointments.filter((row) => inRange(row.starts_at) && (whole || row.user_id === viewer.user_id || (row.case_id !== null && mine.has(row.case_id)))).map((row) => ({
+        kind: 'appointment', id: row.appointment_id, at: row.starts_at, ends_at: row.ends_at, status: row.status, title: row.purpose, case_id: row.case_id, case_number: caseNumber(row.case_id),
+        details: { client_name: clients.find((client) => client.client_id === row.client_id)?.full_name_or_org ?? null, staff_name: nameOf(row.user_id), location: row.location, appointment_type: row.appointment_type },
+      })),
+      ...notices.filter((row) => inRange(`${row.sent_on}T00:00:00`) && (whole || mine.has(row.case_id))).map((row) => ({
+        kind: 'notice', id: row.notice_id, at: `${row.sent_on}T00:00:00`, status: row.delivery_status, title: row.recipient ? `تبليغ إلى ${row.recipient}` : 'ورقة محضر', case_id: row.case_id, case_number: caseNumber(row.case_id),
+        details: { notice_type: row.notice_type, recipient: row.recipient, bailiff_office: row.bailiff_office },
+      })),
+      ...tasks.filter((row) => row.due_at && inRange(row.due_at) && row.status !== 'cancelled' && (whole || row.assigned_to_user_id === viewer.user_id)).map((row) => ({
+        kind: 'task', id: row.task_id, at: row.due_at!, status: row.status, title: row.title, case_id: row.case_id, case_number: caseNumber(row.case_id),
+        details: { assignee_name: row.assigned_to_name, priority: row.priority, private: 0 },
+      })),
+    ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+    return { events }
+  }],
+  ['post', /^\/calendar\/hearings$/, ['admin'], ({ body }) => {
+    const row = hearing(uid('h'), String(body.case_id), 0, 9, String(body.hearing_type), { hearing_at: String(body.hearing_at), court_room: (body.court_room as string) || null, notes: (body.notes as string) || null })
+    hearings.push(row)
+    return { hearing: row }
+  }],
+  ['patch', /^\/calendar\/hearings\/([^/]+)$/, ['admin'], ({ params, body }) => {
+    const row = hearings.find((entry) => entry.hearing_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    Object.assign(row, body)
+    return { hearing: row }
+  }],
+  ['post', /^\/calendar\/appointments$/, ['admin'], ({ body }) => {
+    if ((body.appointment_type ?? 'meeting') === 'meeting' && !body.client_id) throw fail(400, 'VALIDATION')
+    const row: DemoAppointment = { appointment_id: uid('a'), starts_at: String(body.starts_at), ends_at: String(body.ends_at), status: 'scheduled', purpose: String(body.purpose), location: (body.location as string) || null, appointment_type: String(body.appointment_type ?? 'meeting'), client_id: (body.client_id as string) || null, user_id: String(body.user_id), case_id: (body.case_id as string) || null }
+    appointments.push(row)
+    return { appointment: row }
+  }],
+  ['patch', /^\/calendar\/appointments\/([^/]+)$/, ['admin'], ({ params, body }) => {
+    const row = appointments.find((entry) => entry.appointment_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    row.status = String(body.status)
+    return { appointment: { appointment_id: row.appointment_id, status: row.status } }
+  }],
+  ['get', /^\/hearings$/, STAFF, ({ user, query }) => {
+    caseFor(user, String(query.caseId))
+    return { hearings: hearings.filter((row) => row.case_id === query.caseId).sort((a, b) => Date.parse(a.hearing_at) - Date.parse(b.hearing_at)).map(publicHearing) }
+  }],
+  ['post', /^\/hearings\/([^/]+)\/outcome$/, STAFF, ({ user, params, body }) => {
+    const row = hearings.find((entry) => entry.hearing_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    caseFor(user, row.case_id)
+    if (row.next_hearing_id) throw fail(409, 'HEARING_ALREADY_POSTPONED')
+    if (body.postponed_to) {
+      const next = hearing(uid('h'), row.case_id, 0, 9, row.hearing_type, { hearing_at: String(body.postponed_to), court_name: row.court_name, court_room: (body.next_court_room as string) || row.court_room })
+      hearings.push(next)
+      row.next_hearing_id = next.hearing_id
+    }
+    Object.assign(row, {
+      status: body.status, outcome: (body.outcome as string) || null, attended_by_user_id: (body.attended_by_user_id as string) || null,
+      postponement_reason: (body.postponement_reason as string) || null, outcome_recorded_at: new Date().toISOString(),
+    })
+    return { hearing: { hearing_id: row.hearing_id, case_id: row.case_id, status: row.status, next_hearing_id: row.next_hearing_id } }
+  }],
+  ['get', /^\/court-notices$/, STAFF, ({ user, query }) => {
+    const mine = new Set(visibleCases(user).map((row) => row.case_id))
+    const rows = notices.filter((row) => mine.has(row.case_id) && (!query.caseId || row.case_id === query.caseId) && (!query.status || row.delivery_status === query.status))
+      .sort((a, b) => b.sent_on.localeCompare(a.sent_on)).map(publicNotice)
+    return paginate(rows, 'court_notices')
+  }],
+  ['post', /^\/court-notices$/, STAFF, ({ user, body }) => {
+    caseFor(user, String(body.case_id))
+    if (body.delivery_status && body.delivery_status !== 'pending' && !body.delivered_on) throw fail(400, 'VALIDATION')
+    const now = new Date().toISOString()
+    const row: DemoNotice = { notice_id: uid('cn'), notice_type: body.notice_type as NoticeType, recipient: (body.recipient as string) || null, bailiff_office: (body.bailiff_office as string) || null, sent_on: String(body.sent_on), delivery_status: (body.delivery_status as DeliveryStatus) ?? 'pending', delivered_on: (body.delivered_on as string) || null, notes: (body.notes as string) || null, has_attachment: false, case_id: String(body.case_id), created_at: now, updated_at: now }
+    notices.unshift(row)
+    return { court_notice: publicNotice(row) }
+  }],
+  ['patch', /^\/court-notices\/([^/]+)$/, STAFF, ({ user, params, body }) => {
+    const row = notices.find((entry) => entry.notice_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    caseFor(user, row.case_id)
+    Object.assign(row, body, { updated_at: new Date().toISOString() })
+    if (row.delivery_status === 'pending') row.delivered_on = null
+    return { court_notice: publicNotice(row) }
+  }],
+  ['put', /^\/court-notices\/([^/]+)\/attachment$/, STAFF, ({ params }) => {
+    const row = notices.find((entry) => entry.notice_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    row.has_attachment = true
+    return { notice_id: row.notice_id, has_attachment: true }
   }],
 
   // powers of attorney

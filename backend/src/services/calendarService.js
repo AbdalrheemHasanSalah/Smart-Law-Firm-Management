@@ -6,11 +6,13 @@ import { officeCondition } from './officeScope.js';
  * The office calendar: one dated view of what the office has to attend to.
  *
  *   hearing       court sessions of the office's cases (scheduled here)
- *   appointment   meetings with clients (scheduled here)
+ *   appointment   client meetings, expert sessions, court visits and other appointments
+ *   notice        court notices (bailiff papers), on the day they were sent
  *   task          deadlines of tasks the office assigned (private tasks stay private)
  *   invoice       due dates of claims not yet settled
  *
- * The office administrator reads it and schedules hearings and appointments.
+ * The office administrator reads it and schedules hearings and appointments, and may narrow it
+ * to one lawyer's agenda (userId).
  */
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,6 +21,7 @@ const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z
 const MAX_RANGE_DAYS = 62;
 const HEARING_STATUSES = new Set(['scheduled', 'completed', 'postponed', 'cancelled']);
 const APPOINTMENT_STATUSES = new Set(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']);
+const APPOINTMENT_TYPES = new Set(['meeting', 'expert_session', 'court_visit', 'other']);
 
 export class CalendarServiceError extends Error {
   constructor(status, message) {
@@ -84,7 +87,7 @@ async function execute(sql, parameters) {
 
 /** The days to show: from and to are calendar dates, at most two months apart. */
 function parseRange(parameters = {}) {
-  if (!parameters || Object.keys(parameters).some((key) => !['from', 'to'].includes(key))) {
+  if (!parameters || Object.keys(parameters).some((key) => !['from', 'to', 'userId'].includes(key))) {
     invalid('Unsupported calendar query parameter.');
   }
   const { from, to } = parameters;
@@ -114,21 +117,27 @@ export async function listCalendar(actor, queryParameters) {
   if (!actor || !STAFF_ROLES.includes(actor.role) || typeof actor.user_id !== 'string') {
     throw new CalendarServiceError(403, 'You do not have permission to access this resource.');
   }
-  const admin = actor.role === 'admin';
   const range = parseRange(queryParameters);
   const parameters = [range.from, range.to];
   // Pushes the active office as $3 (and refuses a request without one); every query below filters on it.
   officeCondition(actor, parameters, 'office');
-  parameters.push(actor.user_id);
+  // Only the administrator may look at another member's agenda; that view is limited like theirs.
+  const focus = queryParameters?.userId === undefined ? null : uuid(queryParameters.userId, 'userId');
+  if (focus && actor.role !== 'admin') {
+    throw new CalendarServiceError(403, 'You do not have permission to access this resource.');
+  }
+  const admin = actor.role === 'admin' && !focus;
+  parameters.push(focus ?? actor.user_id);
   const office = (alias) => `${alias}.office_id = $3`;
   const scope = {
-    hearing: admin ? '' : `AND ${assignedCase('h.case_id')}`,
+    hearing: admin ? '' : `AND (${assignedCase('h.case_id')} OR h.attended_by_user_id = $4)`,
     appointment: admin ? '' : `AND (a.user_id = $4 OR (a.case_id IS NOT NULL AND ${assignedCase('a.case_id')}))`,
+    notice: admin ? '' : `AND ${assignedCase('n.case_id')}`,
     task: admin ? '' : `AND t.assigned_to_user_id = $4 AND (t.case_id IS NULL OR ${assignedCase('t.case_id')})`,
   };
   const noRows = { rows: [] };
 
-  const [hearings, appointments, tasks, invoices] = await Promise.all([
+  const [hearings, appointments, notices, tasks, invoices] = await Promise.all([
     execute(
       `SELECT h.hearing_id AS id, h.hearing_at AS at, h.hearing_type, h.court_room, h.status, h.outcome, h.notes,
               lc.case_id, lc.case_number, lc.title AS case_title, co.name AS court_name
@@ -141,14 +150,23 @@ export async function listCalendar(actor, queryParameters) {
     ),
     execute(
       `SELECT a.appointment_id AS id, a.starts_at AS at, a.ends_at, a.status, a.purpose, a.location,
-              c.client_id, c.full_name_or_org AS client_name, u.full_name AS staff_name,
+              a.appointment_type, c.client_id, c.full_name_or_org AS client_name, u.full_name AS staff_name,
               lc.case_id, lc.case_number
          FROM appointments a
-         JOIN clients c ON c.client_id = a.client_id AND c.office_id = a.office_id
+         LEFT JOIN clients c ON c.client_id = a.client_id AND c.office_id = a.office_id
          JOIN app_users u ON u.user_id = a.user_id
          LEFT JOIN legal_cases lc ON lc.case_id = a.case_id AND lc.office_id = a.office_id
         WHERE a.starts_at >= $1 AND a.starts_at < $2 AND ${office('a')} ${scope.appointment}
         ORDER BY a.starts_at`,
+      parameters
+    ),
+    execute(
+      `SELECT n.notice_id AS id, n.sent_on AS at, n.notice_type, n.recipient, n.bailiff_office,
+              n.delivery_status, lc.case_id, lc.case_number
+         FROM court_notices n
+         JOIN legal_cases lc ON lc.case_id = n.case_id AND lc.office_id = n.office_id
+        WHERE n.sent_on >= $1::date AND n.sent_on < $2::date AND ${office('n')} ${scope.notice}
+        ORDER BY n.sent_on`,
       parameters
     ),
     execute(
@@ -162,6 +180,7 @@ export async function listCalendar(actor, queryParameters) {
         ORDER BY t.due_at`,
       parameters
     ),
+    // Claims are the whole office's business; a single member's agenda leaves them out.
     admin ? execute(
       `SELECT i.invoice_id AS id, i.due_at AS at, i.invoice_number, i.amount, i.currency, i.status,
               c.full_name_or_org AS client_name, lc.case_id, lc.case_number
@@ -184,7 +203,12 @@ export async function listCalendar(actor, queryParameters) {
     ...appointments.rows.map((row) => ({
       kind: 'appointment', id: row.id, at: row.at, ends_at: row.ends_at, status: row.status,
       title: row.purpose, case_id: row.case_id, case_number: row.case_number,
-      details: { client_name: row.client_name, staff_name: row.staff_name, location: row.location },
+      details: { client_name: row.client_name, staff_name: row.staff_name, location: row.location, appointment_type: row.appointment_type },
+    })),
+    ...notices.rows.map((row) => ({
+      kind: 'notice', id: row.id, at: row.at, status: row.delivery_status,
+      title: row.recipient ? `تبليغ إلى ${row.recipient}` : 'ورقة محضر', case_id: row.case_id, case_number: row.case_number,
+      details: { notice_type: row.notice_type, recipient: row.recipient, bailiff_office: row.bailiff_office },
     })),
     ...tasks.rows.map((row) => ({
       kind: 'task', id: row.id, at: row.at, status: row.status,
@@ -266,8 +290,11 @@ export async function updateHearing(actor, hearingId, body) {
 
 export async function createAppointment(actor, body) {
   assertAdmin(actor);
-  assertBody(body, ['client_id', 'user_id', 'case_id', 'starts_at', 'ends_at', 'purpose', 'location']);
-  const clientId = uuid(body.client_id, 'client_id');
+  assertBody(body, ['client_id', 'user_id', 'case_id', 'starts_at', 'ends_at', 'purpose', 'location', 'appointment_type']);
+  const appointmentType = body.appointment_type ?? 'meeting';
+  if (!APPOINTMENT_TYPES.has(appointmentType)) invalid('appointment_type is not supported.');
+  if (appointmentType === 'meeting' && body.client_id == null) invalid('A client meeting needs a client.');
+  const clientId = body.client_id == null ? null : uuid(body.client_id, 'client_id');
   const userId = uuid(body.user_id, 'user_id');
   const caseId = body.case_id == null ? null : uuid(body.case_id, 'case_id');
   const startsAt = timestamp(body.starts_at, 'starts_at');
@@ -276,27 +303,28 @@ export async function createAppointment(actor, body) {
   const purpose = text(body.purpose, 'purpose', 300, { required: true });
   const location = text(body.location, 'location', 200);
   const parameters = [clientId, userId, caseId];
-  const officeClause = officeCondition(actor, parameters, 'c');
-  // Client, staff member and case must all belong to this office; the staff member must be active staff.
+  const officeClause = officeCondition(actor, parameters, 'membership');
+  // Client (when given), staff member and case must all belong to this office; the staff member
+  // must be active staff.
   const result = await execute(
-    `INSERT INTO appointments (starts_at, ends_at, purpose, location, client_id, user_id, case_id, office_id)
-     SELECT $5::timestamptz, $6::timestamptz, $7::text, $8::text, c.client_id, membership.user_id, lc.case_id, c.office_id
-       FROM clients c
-       JOIN office_memberships membership
-         ON membership.office_id = c.office_id AND membership.user_id = $2 AND membership.status = 'active'
+    `INSERT INTO appointments (starts_at, ends_at, purpose, location, appointment_type, client_id, user_id, case_id, office_id)
+     SELECT $5::timestamptz, $6::timestamptz, $7::text, $8::text, $9::text, c.client_id, membership.user_id, lc.case_id, membership.office_id
+       FROM office_memberships membership
        JOIN roles r ON r.role_id = membership.role_id AND r.role_name IN ('admin', 'lawyer', 'assistant')
-       LEFT JOIN legal_cases lc ON lc.case_id = $3::uuid AND lc.office_id = c.office_id
-      WHERE c.client_id = $1 AND ${officeClause}
+       LEFT JOIN clients c ON c.client_id = $1::uuid AND c.office_id = membership.office_id
+       LEFT JOIN legal_cases lc ON lc.case_id = $3::uuid AND lc.office_id = membership.office_id
+      WHERE membership.user_id = $2 AND membership.status = 'active' AND ${officeClause}
+        AND ($1::uuid IS NULL OR c.client_id IS NOT NULL)
         AND ($3::uuid IS NULL OR lc.case_id IS NOT NULL)
-     RETURNING appointment_id, starts_at, ends_at, status, purpose, location, client_id, user_id, case_id`,
-    [...parameters, startsAt, endsAt, purpose, location]
+     RETURNING appointment_id, starts_at, ends_at, status, purpose, location, appointment_type, client_id, user_id, case_id`,
+    [...parameters, startsAt, endsAt, purpose, location, appointmentType]
   );
   if (!result.rowCount) throw new CalendarServiceError(404, 'Client, staff member or case not found.');
   auditLater(actor, {
     action: 'appointment_scheduled',
-    entityType: 'client',
-    entityId: clientId,
-    details: { values: { purpose, starts_at: startsAt, location } },
+    entityType: clientId ? 'client' : caseId ? 'case' : 'office',
+    entityId: clientId ?? caseId ?? actor.office_id,
+    details: { values: { purpose, starts_at: startsAt, location, appointment_type: appointmentType } },
   });
   return result.rows[0];
 }
