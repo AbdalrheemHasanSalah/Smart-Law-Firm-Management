@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Briefcase, FileText, ListChecks, MessagesSquare, StickyNote, Users, type LucideIcon } from 'lucide-react'
+import { AlarmClock, Bell, Briefcase, FileText, ListChecks, MessagesSquare, StickyNote, Users, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, messageOf } from '@/lib/api'
+import { personaOf, useAuth } from '@/auth/auth'
+import { usePreferences, useSavePreferences } from '@/lib/reminders'
 import type { NotificationItem } from '@/lib/types'
 import { cn } from './kit'
 import { LANG } from '@/lib/i18n'
@@ -25,6 +27,7 @@ const ICONS: Record<string, LucideIcon> = {
   case_status: Briefcase,
   case_assignment: Briefcase,
   team: Users,
+  reminder: AlarmClock,
 }
 
 const relative = new Intl.RelativeTimeFormat(LANG, { numeric: 'auto' })
@@ -37,9 +40,37 @@ export const timeAgo = (value: string) => {
   return relative.format(Math.round(hours / 24), 'day')
 }
 
+/** Staff only: whether reminders (hearings, tasks, appointments, powers of attorney) also come by email. */
+const ReminderEmails = () => {
+  const preferences = usePreferences()
+  const save = useSavePreferences()
+  const checked = preferences.data?.email_reminders ?? true
+  return (
+    <div className="border-t border-ink/10 px-4 py-3">
+      <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-ink">
+        <span>
+          <span className="block font-semibold">تذكيرات بالبريد</span>
+          <span className="block text-xs text-ink-faint">الجلسات والمهام والمواعيد والتوكيلات. تبقى التذكيرات هنا دائماً.</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={preferences.isPending || save.isPending}
+          onChange={(event) => save.mutate({ email_reminders: event.target.checked })}
+          className="size-4 shrink-0 accent-stamp"
+        />
+      </label>
+      {save.isError && <p role="alert" className="mt-1 text-xs text-stamp">{messageOf(save.error)}</p>}
+    </div>
+  )
+}
+
 /** The bell in the top bar: a count of unread notifications and a panel listing the latest. */
 export const NotificationBell = () => {
   const queryClient = useQueryClient()
+  const persona = personaOf(useAuth().session)
+  // Reminders reach office staff; clients and the platform owner have none to configure.
+  const staff = persona === 'owner' || persona === 'lawyer'
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const inbox = useQuery({
@@ -132,6 +163,7 @@ export const NotificationBell = () => {
                 )
               })}
             </ul>
+            {staff && <ReminderEmails />}
           </motion.div>
         )}
       </AnimatePresence>

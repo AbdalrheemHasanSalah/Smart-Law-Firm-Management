@@ -151,7 +151,10 @@ const messages: Message[] = [
 ]
 
 type DemoNotification = NotificationItem & { user_id: string }
+const reminderEmailsOff = new Set<string>()
 const notifications: DemoNotification[] = [
+  { notification_id: 'nt-r1', user_id: 'u-owner', title: 'توكيل ينتهي قريباً', body: 'ينتهي التوكيل رقم و-2026/0412 خلال 18 يوماً. جدّده أو استبدله حتى لا تبقى قضاياه دون توكيل ساري.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(30) },
+  { notification_id: 'nt-r2', user_id: 'u-lawyer', title: 'تذكير: جلسة غداً', body: 'لديك جلسة سماع شهود في القضية 2026/114 غداً الساعة 9:00 ص.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(45) },
   { notification_id: 'nt-1', user_id: 'u-owner', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(95) },
   { notification_id: 'nt-2', user_id: 'u-owner', title: 'أُنجزت مهمة', body: 'أنجز أحد أعضاء المكتب مهمة مسندة إليه.', notification_type: 'task', read_at: null, created_at: minutesAgo(400) },
   { notification_id: 'nt-3', user_id: 'u-owner', title: 'ملاحظة جديدة على قضية', body: 'أُضيفت ملاحظة جديدة على القضية رقم 2026/114.', notification_type: 'case_note', read_at: minutesAgo(900), created_at: minutesAgo(1500) },
@@ -711,6 +714,15 @@ const routes: Route[] = [
     office.review_note = (body.review_note as string) ?? null
     office.reviewed_at = new Date().toISOString()
     return { office }
+  }],
+
+  // the person's own reminder settings
+  ['get', /^\/me\/preferences$/, ['any'], ({ user }) => ({ preferences: { email_reminders: !reminderEmailsOff.has(user.user_id) } })],
+  ['patch', /^\/me\/preferences$/, ['any'], ({ user, body }) => {
+    if (typeof body.email_reminders !== 'boolean') throw fail(400, 'VALIDATION')
+    if (body.email_reminders) reminderEmailsOff.delete(user.user_id)
+    else reminderEmailsOff.add(user.user_id)
+    return { preferences: { email_reminders: body.email_reminders } }
   }],
 
   // inbox: notifications and direct messages

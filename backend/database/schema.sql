@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS app_users (
     status VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'suspended')),
     is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Reminder emails (hearings, tasks, appointments); in-app reminders are always kept.
+    email_reminders BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     role_id UUID NOT NULL REFERENCES roles(role_id)
@@ -276,6 +278,16 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id UUID NOT NULL REFERENCES app_users(user_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
     FOREIGN KEY (office_id, user_id) REFERENCES office_memberships(office_id, user_id)
+);
+
+-- One row per reminder sent to one person; inserting it first claims the reminder, so it is
+-- never sent twice.
+CREATE TABLE IF NOT EXISTS reminder_deliveries (
+    reminder_key VARCHAR(200) NOT NULL,
+    user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (reminder_key, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -684,3 +696,4 @@ CREATE INDEX IF NOT EXISTS idx_power_of_attorney_cases_case ON power_of_attorney
 CREATE INDEX IF NOT EXISTS idx_hearings_office_date ON hearings(office_id, hearing_at);
 CREATE INDEX IF NOT EXISTS idx_court_notices_case ON court_notices(case_id, sent_on DESC);
 CREATE INDEX IF NOT EXISTS idx_court_notices_office_sent ON court_notices(office_id, sent_on);
+CREATE INDEX IF NOT EXISTS idx_reminder_deliveries_sent ON reminder_deliveries(sent_at);

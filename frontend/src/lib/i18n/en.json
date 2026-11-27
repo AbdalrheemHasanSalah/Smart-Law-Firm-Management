@@ -1220,5 +1220,12 @@
   "حدّث ورقة محضر": "updated a bailiff paper",
   "النتيجة": "Outcome",
   "· إلى": "· to",
-  "حضرها": "attended by"
+  "حضرها": "attended by",
+  "تذكيرات بالبريد": "Email reminders",
+  "الجلسات والمهام والمواعيد والتوكيلات. تبقى التذكيرات هنا دائماً.": "Hearings, tasks, appointments and powers of attorney. Reminders always appear here too.",
+  "تذكير: جلسة غداً": "Reminder: hearing tomorrow",
+  "تذكير: جلسة اليوم": "Reminder: hearing today",
+  "تذكير: مهمة مستحقة غداً": "Reminder: task due tomorrow",
+  "تذكير: موعد اليوم": "Reminder: appointment today",
+  "توكيل ينتهي قريباً": "Power of attorney expiring soon"
 }
