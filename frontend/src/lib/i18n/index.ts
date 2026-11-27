@@ -51,6 +51,7 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^شهراً بشهر \((.+)\)$/, 'Month by month ($1)'],
   [/^سُجّل المصروف، لكن تعذّر رفع الإيصال: (.+) أرفقه لاحقاً\.$/, 'The expense was recorded, but the receipt could not be uploaded: $1 Attach it later.'],
   [/^ربحية القضية \((.+)\)$/, 'Case profitability ($1)'],
+  [/^نسبة التحصيل (\d+)%$/, 'Collection rate $1%'],
   [/^سبب التأجيل: (.+)$/, 'Reason for postponement: $1'],
   [/^(\d+) أوراق بانتظار التبليغ\.$/, '$1 papers awaiting delivery.'],
   [/^حُفظت الورقة، لكن تعذّر رفع الملف: (.+) أعد المحاولة\.$/, 'The paper was saved, but the file could not be uploaded: $1 Try again.'],

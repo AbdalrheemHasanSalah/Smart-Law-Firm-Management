@@ -4,6 +4,7 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
+  ChartColumn,
   CreditCard,
   FileSignature,
   Stamp as StampIcon,
@@ -51,6 +52,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
   { to: `${PATHS.office}/contracts`, label: 'العقود', icon: FileSignature },
   { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon },
   { to: `${PATHS.office}/messages`, label: 'الرسائل', icon: MessagesSquare, badge: 'messages' },
+  { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
   { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
   ...extra,
 ]

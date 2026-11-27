@@ -804,6 +804,91 @@ const routes: Route[] = [
     return { case_id: params[0], totals: [{ currency: 'ILS', billed: collected, collected, spent, net: collected - spent }] }
   }],
 
+  // reports
+  ['get', /^\/reports$/, STAFF, ({ user, query }) => {
+    const focus = user.role === 'admin' && typeof query.userId === 'string' && query.userId ? users.find((entry) => entry.user_id === query.userId) ?? null : null
+    if (query.userId && user.role !== 'admin') throw fail(403, 'FORBIDDEN')
+    const whole = user.role === 'admin' && !focus
+    const viewer = focus ?? user
+    const from = String(query.from)
+    const to = String(query.to)
+    const inRange = (at: string | null) => Boolean(at) && at!.slice(0, 10) >= from && at!.slice(0, 10) <= to
+    const myCases = whole ? cases : cases.filter((row) => assignments.some((link) => link.case_id === row.case_id && link.user_id === viewer.user_id))
+    const mine = new Set(myCases.map((row) => row.case_id))
+    const count = <T,>(rows: T[], key: (row: T) => string) => rows.reduce<Record<string, number>>((acc, row) => ({ ...acc, [key(row)]: (acc[key(row)] ?? 0) + 1 }), {})
+    const myHearings = hearings.filter((row) => mine.has(row.case_id))
+    const myTasks = tasks.filter((row) => whole || row.assigned_to_user_id === viewer.user_id)
+    const now = new Date().toISOString()
+    const caseNumber = (caseId: string | null) => cases.find((entry) => entry.case_id === caseId)?.case_number ?? null
+    const types = count(myCases, (row) => row.case_type)
+    const report = {
+      from, to, scope: whole ? 'office' : 'member', user_id: whole ? null : viewer.user_id,
+      cases: {
+        by_status: count(myCases, (row) => row.status),
+        by_type: Object.entries(types).map(([case_type, n]) => ({ case_type, count: n })).sort((a, b) => b.count - a.count),
+        opened: myCases.filter((row) => inRange(row.opened_at)).length,
+        closed: myCases.filter((row) => inRange(row.closed_at)).length,
+        per_lawyer: whole
+          ? users.filter((entry) => entry.role && entry.role !== 'client').map((entry) => {
+            const theirs = cases.filter((row) => assignments.some((link) => link.case_id === row.case_id && link.user_id === entry.user_id))
+            return { user_id: entry.user_id, full_name: entry.full_name, open: theirs.filter((row) => !['closed', 'cancelled'].includes(row.status)).length, closed: theirs.filter((row) => ['closed', 'cancelled'].includes(row.status)).length }
+          }).filter((row) => row.open || row.closed).sort((a, b) => b.open - a.open)
+          : null,
+      },
+      hearings: {
+        by_status: count(myHearings.filter((row) => inRange(row.hearing_at)), (row) => row.status),
+        missed: myHearings.filter((row) => row.status === 'scheduled' && row.hearing_at < now).map((row) => ({
+          hearing_id: row.hearing_id, hearing_at: row.hearing_at, hearing_type: row.hearing_type, case_id: row.case_id,
+          case_number: caseNumber(row.case_id), title: cases.find((entry) => entry.case_id === row.case_id)?.title ?? '',
+        })),
+      },
+      tasks: {
+        by_status: count(myTasks.filter((row) => inRange(row.due_at)), (row) => row.status),
+        overdue: myTasks.filter((row) => ['pending', 'in_progress'].includes(row.status) && row.due_at && row.due_at < now).map((row) => ({
+          task_id: row.task_id, title: row.title, due_at: row.due_at!, priority: row.priority, assignee_name: row.assigned_to_name, case_id: row.case_id, case_number: caseNumber(row.case_id),
+        })),
+      },
+      finance: null as unknown,
+    }
+    if (whole) {
+      const collected = clientPayments.filter((row) => inRange(row.on_date))
+      const byCurrency: Record<string, { currency: MoneyCurrency; billed: number; collected: number }> = {}
+      for (const row of collected) {
+        const currency = accounts.find((account) => account.account_id === row.account_id)!.currency
+        const entry = (byCurrency[currency] ??= { currency, billed: 0, collected: 0 })
+        entry.collected += row.amount
+        entry.billed += row.amount * 1.4
+      }
+      const spent = officeExpenses.filter((row) => row.status === 'active' && inRange(row.spent_on))
+      const categories: Record<string, { category: ExpenseCategory; currency: MoneyCurrency; spent: number }> = {}
+      for (const row of spent) categories[row.category] = { category: row.category, currency: row.currency, spent: (categories[row.category]?.spent ?? 0) + row.amount }
+      const months: Record<string, { month: string; currency: MoneyCurrency; collected: number; spent: number; net: number }> = {}
+      for (const row of collected) {
+        const currency = accounts.find((account) => account.account_id === row.account_id)!.currency
+        const entry = (months[`${row.on_date.slice(0, 7)}|${currency}`] ??= { month: row.on_date.slice(0, 7), currency, collected: 0, spent: 0, net: 0 })
+        entry.collected += row.amount
+      }
+      for (const row of spent) {
+        const entry = (months[`${row.spent_on.slice(0, 7)}|${row.currency}`] ??= { month: row.spent_on.slice(0, 7), currency: row.currency, collected: 0, spent: 0, net: 0 })
+        entry.spent += row.amount
+      }
+      for (const entry of Object.values(months)) entry.net = entry.collected - entry.spent
+      report.finance = {
+        billed_vs_collected: Object.values(byCurrency).map((entry) => ({ ...entry, billed: Math.round(entry.billed) })),
+        aging: [{ currency: 'ILS', current: 4200, d1_30: 1800, d31_60: 950, d61_90: 0, d90_plus: 600, total: 7550 }],
+        debtors: [
+          { client_id: 'c-2', client_name: 'شركة الزيتونة للتجارة', currency: 'ILS', outstanding: 4200, invoices: 2, oldest_days_late: 0 },
+          { client_id: 'c-1', client_name: 'محمود النجار', currency: 'ILS', outstanding: 2750, invoices: 2, oldest_days_late: 48 },
+          { client_id: 'c-4', client_name: 'يوسف دراغمة', currency: 'ILS', outstanding: 600, invoices: 1, oldest_days_late: 112 },
+        ],
+        expenses_by_category: Object.values(categories).sort((a, b) => b.spent - a.spent),
+        profit_by_month: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)),
+        profit_totals: [],
+      }
+    }
+    return report
+  }],
+
   // powers of attorney
   ['get', /^\/powers-of-attorney\/lawyers$/, STAFF, () => ({
     lawyers: users.filter((user) => (user.role === 'admin' || user.role === 'lawyer') && user.status === 'active').map((user) => ({ user_id: user.user_id, full_name: user.full_name, role: user.role })),
