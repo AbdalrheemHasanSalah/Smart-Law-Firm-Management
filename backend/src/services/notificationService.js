@@ -191,6 +191,24 @@ async function plan(event, payload, query) {
         path: '/office/tasks', button: 'افتح المهام',
       }];
     }
+    case 'leave.requested': {
+      const owner = await rows(OWNER_OF_OFFICE, [officeId]);
+      return [{
+        people: audience([owner], actorUserId), officeId, type: 'team',
+        title: 'طلب إجازة جديد', body: `طلب أحد أعضاء الفريق إجازة لمدة ${payload.days} يوم عمل، وهو بانتظار قرارك.`,
+        path: '/office/team?tab=leave', button: 'راجع الطلب',
+      }];
+    }
+    case 'leave.decided': {
+      const requester = await rows(MEMBER_OF_OFFICE, [officeId, payload.userId]);
+      const approved = payload.status === 'approved';
+      return [{
+        people: audience([requester], actorUserId), officeId, type: 'team',
+        title: approved ? 'وُوفق على إجازتك' : 'لم يُوافق على إجازتك',
+        body: approved ? 'وافق مدير المكتب على طلب إجازتك.' : 'لم يوافق مدير المكتب على طلب إجازتك. افتح الطلب لترى الملاحظة.',
+        path: '/office/me', button: 'افتح صفحتي',
+      }];
+    }
     case 'task.completed': {
       const owner = await rows(OWNER_OF_OFFICE, [officeId]);
       return [{

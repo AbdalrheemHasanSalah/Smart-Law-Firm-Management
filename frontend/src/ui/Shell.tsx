@@ -5,6 +5,7 @@ import {
   Building2,
   CalendarDays,
   ChartColumn,
+  IdCard,
   CreditCard,
   FileSignature,
   Stamp as StampIcon,
@@ -53,6 +54,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
   { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon },
   { to: `${PATHS.office}/messages`, label: 'الرسائل', icon: MessagesSquare, badge: 'messages' },
   { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
+  { to: `${PATHS.office}/me`, label: 'صفحتي', icon: IdCard },
   { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
   ...extra,
 ]

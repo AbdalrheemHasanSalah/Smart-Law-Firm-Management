@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Gavel, ListChecks, Plus, Receipt, ScrollText, Users, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Gavel, ListChecks, Palmtree, Plus, Receipt, ScrollText, Users, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { PATHS, personaOf, useAuth } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
 import { APPOINTMENT_TYPE, formatDay, formatMoney, formatTime, optionsOf, PRIORITY, ROLE } from '@/lib/labels'
 import { DELIVERY_STATUS, NOTICE_TYPE, type DeliveryStatus, type NoticeType } from '@/lib/courtNotices'
+import { LEAVE_TYPE, type LeaveType } from '@/lib/hr'
 import { useParam } from '@/lib/useParam'
 import type { Client, Member } from '@/lib/types'
 import { FormActions, Modal, SelectField, TextArea } from '@/ui/forms'
@@ -14,7 +15,7 @@ import { Failed, Loading, SheetHeader } from '@/ui/Shell'
 import { useCases } from './Office'
 import { LOCALE } from '@/lib/i18n'
 
-type Kind = 'hearing' | 'appointment' | 'notice' | 'task' | 'invoice'
+type Kind = 'hearing' | 'appointment' | 'notice' | 'leave' | 'task' | 'invoice'
 
 type CalendarEvent = {
   kind: Kind
@@ -33,6 +34,7 @@ const KIND: Record<Kind, { label: string; icon: LucideIcon; chip: string; dot: s
   hearing: { label: 'جلسات المحاكم', icon: Gavel, chip: 'bg-stamp/10 text-stamp', dot: 'bg-stamp' },
   appointment: { label: 'المواعيد', icon: Users, chip: 'bg-stamp-blue/10 text-stamp-blue', dot: 'bg-stamp-blue' },
   notice: { label: 'أوراق المحضرين', icon: ScrollText, chip: 'bg-manila/60 text-ink', dot: 'bg-manila-deep' },
+  leave: { label: 'الإجازات', icon: Palmtree, chip: 'bg-note-blue/60 text-ink', dot: 'bg-ink-faint' },
   task: { label: 'مواعيد المهام', icon: ListChecks, chip: 'bg-ink/8 text-ink', dot: 'bg-ink' },
   invoice: { label: 'استحقاق المطالبات', icon: Receipt, chip: 'bg-stamp-green/15 text-stamp-green', dot: 'bg-stamp-green' },
 }
@@ -61,7 +63,7 @@ const monthGrid = (month: Date) => {
   return Array.from({ length: 42 }, (_, index) => addDays(start, index))
 }
 /** An invoice falls due and a notice is sent on a date; the rest happen at a time of day. */
-const hasTime = (event: CalendarEvent) => event.kind !== 'invoice' && event.kind !== 'notice'
+const hasTime = (event: CalendarEvent) => !['invoice', 'notice', 'leave'].includes(event.kind)
 
 /** The calendar for a range; `userId` narrows the administrator's view to one member's agenda. */
 const useCalendar = (from: string, to: string, userId: string | null) =>
@@ -238,6 +240,8 @@ const EventDetails = ({ event }: { event: CalendarEvent }) => {
       ? [d.case_title as string, d.court_name ? `محكمة ${d.court_name}` : null, d.court_room ? `قاعة ${d.court_room}` : null, d.notes as string]
       : event.kind === 'appointment'
         ? [APPOINTMENT_TYPE[String(d.appointment_type ?? 'meeting')] ?? null, d.client_name ? `مع ${d.client_name}` : null, `${d.staff_name} من المكتب`, d.location as string]
+        : event.kind === 'leave'
+          ? [`إجازة ${LEAVE_TYPE[d.leave_type as LeaveType] ?? ''}`, `${formatDay(String(d.starts_on))} – ${formatDay(String(d.ends_on))}`]
         : event.kind === 'notice'
           ? [NOTICE_TYPE[d.notice_type as NoticeType] ?? null, d.bailiff_office as string, DELIVERY_STATUS[event.status as DeliveryStatus]?.text ?? null]
         : event.kind === 'task'

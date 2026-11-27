@@ -28,6 +28,7 @@ import type { PoaType, PowerOfAttorney } from './powersOfAttorney'
 import type { HearingLogEntry } from './hearings'
 import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
 import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseCategory, FinanceAccount, LedgerEntry } from './officeFinance'
+import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './hr'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -344,6 +345,58 @@ const movementsOf = (accountId: string): Omit<LedgerEntry, 'balance_after'>[] =>
 const balanceOf = (account: DemoAccount) => movementsOf(account.account_id).reduce((sum, row) => sum + row.amount, account.opening_balance)
 const publicAccount = (row: DemoAccount): FinanceAccount => ({ ...row, balance: balanceOf(row) })
 
+/* ───────────── team HR ───────────── */
+
+// A copy of lib/hr's count (Fridays skipped): importing it would make demo → hr → api → demo circular.
+const leaveDays = (startsOn: string, endsOn: string) => {
+  let days = 0
+  for (const day = new Date(`${startsOn}T00:00:00Z`); day.toISOString().slice(0, 10) <= endsOn; day.setUTCDate(day.getUTCDate() + 1)) {
+    if (day.getUTCDay() !== 5) days += 1
+  }
+  return days
+}
+
+type DemoProfile = Pick<StaffRecord, 'user_id' | 'job_title' | 'hire_date' | 'phone' | 'national_id' | 'monthly_salary' | 'salary_currency' | 'annual_leave_days'>
+const profiles: DemoProfile[] = [
+  { user_id: 'u-owner', job_title: 'المحامي الرئيسي', hire_date: dayOnly(-2200), phone: '0599 100 200', national_id: '901234567', monthly_salary: null, salary_currency: 'ILS', annual_leave_days: 21 },
+  { user_id: 'u-lawyer', job_title: 'محامية', hire_date: dayOnly(-700), phone: '0599 300 400', national_id: '902345678', monthly_salary: 4500, salary_currency: 'ILS', annual_leave_days: 14 },
+  { user_id: 'u-assistant', job_title: 'مساعدة قانونية', hire_date: dayOnly(-300), phone: '0568 500 600', national_id: '903456789', monthly_salary: 2800, salary_currency: 'ILS', annual_leave_days: 14 },
+]
+const advances: (Omit<Advance, 'full_name' | 'account_name'> & { account_id: string })[] = [
+  { advance_id: 'ad-1', user_id: 'u-assistant', amount: 800, currency: 'ILS', given_on: dayOnly(-35), note: 'ظرف عائلي', account_id: 'fa-1' },
+]
+const payslips: Omit<Payslip, 'full_name' | 'advances_owed' | 'account_name'>[] = [
+  { payslip_id: 'ps-1', user_id: 'u-lawyer', period: dayOnly(-30).slice(0, 7), salary: 4500, advance_deduction: 0, other_deductions: 0, deduction_note: null, net: 4500, currency: 'ILS', status: 'paid', paid_on: dayOnly(-27) },
+  { payslip_id: 'ps-2', user_id: 'u-assistant', period: dayOnly(-30).slice(0, 7), salary: 2800, advance_deduction: 400, other_deductions: 0, deduction_note: null, net: 2400, currency: 'ILS', status: 'paid', paid_on: dayOnly(-27) },
+]
+const leaveRequests: Omit<LeaveRequest, 'full_name' | 'decided_by_name'>[] = [
+  { leave_id: 'lv-1', user_id: 'u-lawyer', leave_type: 'annual', starts_on: dayOnly(9), ends_on: dayOnly(11), days: leaveDays(dayOnly(9), dayOnly(11)), reason: 'سفر عائلي', status: 'approved', decision_note: null, created_at: daysFromNow(-6) },
+  { leave_id: 'lv-2', user_id: 'u-assistant', leave_type: 'sick', starts_on: dayOnly(2), ends_on: dayOnly(3), days: leaveDays(dayOnly(2), dayOnly(3)), reason: 'مراجعة طبية', status: 'pending', decision_note: null, created_at: daysFromNow(-1) },
+  { leave_id: 'lv-3', user_id: 'u-lawyer', leave_type: 'annual', starts_on: dayOnly(-60), ends_on: dayOnly(-58), days: leaveDays(dayOnly(-60), dayOnly(-58)), reason: null, status: 'approved', decision_note: null, created_at: daysFromNow(-70) },
+]
+const owedBy = (userId: string) =>
+  advances.filter((row) => row.user_id === userId).reduce((sum, row) => sum + row.amount, 0)
+  - payslips.filter((row) => row.user_id === userId && row.status === 'paid').reduce((sum, row) => sum + row.advance_deduction, 0)
+const annualTaken = (userId: string, statuses: string[]) =>
+  leaveRequests.filter((row) => row.user_id === userId && row.leave_type === 'annual' && statuses.includes(row.status) && row.starts_on.slice(0, 4) === String(new Date().getFullYear()))
+    .reduce((sum, row) => sum + row.days, 0)
+const staffRecord = (user: DemoUser): StaffRecord => {
+  const profile = profiles.find((row) => row.user_id === user.user_id)
+  const entitlement = profile?.annual_leave_days ?? 14
+  const used = annualTaken(user.user_id, ['approved'])
+  return {
+    user_id: user.user_id, full_name: user.full_name, email: user.email, role: user.role as StaffRecord['role'], membership_status: 'active',
+    job_title: profile?.job_title ?? null, hire_date: profile?.hire_date ?? null, phone: profile?.phone ?? null, national_id: profile?.national_id ?? null,
+    monthly_salary: profile?.monthly_salary ?? null, salary_currency: profile?.salary_currency ?? 'ILS', annual_leave_days: entitlement, has_record: Boolean(profile),
+    advances_owed: owedBy(user.user_id), annual_used: used, annual_pending: annualTaken(user.user_id, ['pending']), annual_remaining: entitlement - used,
+  }
+}
+const publicPayslip = (row: (typeof payslips)[number]): Payslip => ({
+  ...row, full_name: nameOf(row.user_id), advances_owed: owedBy(row.user_id), account_name: row.status === 'paid' ? 'بنك فلسطين' : null,
+})
+const publicLeave = (row: (typeof leaveRequests)[number]): LeaveRequest => ({ ...row, full_name: nameOf(row.user_id), decided_by_name: row.status === 'approved' || row.status === 'rejected' ? nameOf('u-owner') : null })
+const staffUsers = () => users.filter((user) => user.role && user.role !== 'client')
+
 /* ───────────── session ───────────── */
 
 const KEY = 'qadiyati.demo.user'
@@ -589,6 +642,14 @@ const routes: Route[] = [
         kind: 'notice', id: row.notice_id, at: `${row.sent_on}T00:00:00`, status: row.delivery_status, title: row.recipient ? `تبليغ إلى ${row.recipient}` : 'ورقة محضر', case_id: row.case_id, case_number: caseNumber(row.case_id),
         details: { notice_type: row.notice_type, recipient: row.recipient, bailiff_office: row.bailiff_office },
       })),
+      ...leaveRequests.filter((row) => row.status === 'approved' && (whole || row.user_id === viewer.user_id)).flatMap((row) => {
+        const days: string[] = []
+        for (const day = new Date(`${row.starts_on}T00:00:00Z`); day.toISOString().slice(0, 10) <= row.ends_on; day.setUTCDate(day.getUTCDate() + 1)) days.push(day.toISOString().slice(0, 10))
+        return days.filter((day) => inRange(`${day}T12:00:00`)).map((day) => ({
+          kind: 'leave', id: `${row.leave_id}:${day}`, at: `${day}T00:00:00`, status: 'approved', title: `إجازة ${nameOf(row.user_id)}`, case_id: null, case_number: null,
+          details: { leave_type: row.leave_type, full_name: nameOf(row.user_id), starts_on: row.starts_on, ends_on: row.ends_on },
+        }))
+      }),
       ...tasks.filter((row) => row.due_at && inRange(row.due_at) && row.status !== 'cancelled' && (whole || row.assigned_to_user_id === viewer.user_id)).map((row) => ({
         kind: 'task', id: row.task_id, at: row.due_at!, status: row.status, title: row.title, case_id: row.case_id, case_number: caseNumber(row.case_id),
         details: { assignee_name: row.assigned_to_name, priority: row.priority, private: 0 },
@@ -887,6 +948,102 @@ const routes: Route[] = [
       }
     }
     return report
+  }],
+
+  // team HR
+  ['get', /^\/hr\/me$/, STAFF, ({ user }) => ({
+    profile: staffRecord(user),
+    payslips: payslips.filter((row) => row.user_id === user.user_id && row.status === 'paid').map(publicPayslip),
+    leave: leaveRequests.filter((row) => row.user_id === user.user_id).map(publicLeave),
+    advances: advances.filter((row) => row.user_id === user.user_id).map((row) => ({ ...row, full_name: nameOf(row.user_id), account_name: 'صندوق المكتب' })),
+  })],
+  ['get', /^\/hr\/staff$/, ['admin'], () => ({ staff: staffUsers().map(staffRecord) })],
+  ['put', /^\/hr\/staff\/([^/]+)$/, ['admin'], ({ params, body }) => {
+    const user = staffUsers().find((entry) => entry.user_id === params[0])
+    if (!user) throw fail(400, 'VALIDATION')
+    const record: DemoProfile = { user_id: user.user_id, job_title: (body.job_title as string) ?? null, hire_date: (body.hire_date as string) ?? null, phone: (body.phone as string) ?? null, national_id: (body.national_id as string) ?? null, monthly_salary: (body.monthly_salary as number | null) ?? null, salary_currency: (body.salary_currency as MoneyCurrency) ?? 'ILS', annual_leave_days: Number(body.annual_leave_days ?? 14) }
+    const index = profiles.findIndex((row) => row.user_id === user.user_id)
+    if (index >= 0) profiles[index] = record
+    else profiles.push(record)
+    return { staff: staffRecord(user) }
+  }],
+  ['get', /^\/hr\/advances$/, STAFF, ({ user }) => ({
+    advances: advances.filter((row) => user.role === 'admin' || row.user_id === user.user_id).map((row) => ({ ...row, full_name: nameOf(row.user_id), account_name: accounts.find((account) => account.account_id === row.account_id)?.name ?? null })),
+  })],
+  ['post', /^\/hr\/advances$/, ['admin'], ({ body }) => {
+    const profile = profiles.find((row) => row.user_id === body.user_id)
+    const account = accounts.find((row) => row.account_id === body.account_id)
+    if (!profile || !account || account.currency !== profile.salary_currency) throw fail(400, 'VALIDATION')
+    advances.unshift({ advance_id: uid('ad'), user_id: profile.user_id, amount: Number(body.amount), currency: account.currency, given_on: String(body.given_on), note: (body.note as string) || null, account_id: account.account_id })
+    officeExpenses.unshift(expense(uid('ex'), 'salaries', Number(body.amount), 0, { spent_on: String(body.given_on), payee: nameOf(profile.user_id), description: 'سلفة على الراتب', account_id: account.account_id }))
+    return { advance_id: 'ok' }
+  }],
+  ['get', /^\/hr\/payslips$/, STAFF, ({ user, query }) => ({
+    payslips: payslips.filter((row) => (!query.period || row.period === query.period) && (user.role === 'admin' || (row.user_id === user.user_id && row.status === 'paid'))).map(publicPayslip),
+  })],
+  ['post', /^\/hr\/payroll$/, ['admin'], ({ body }) => {
+    const period = String(body.period)
+    let created = 0
+    for (const profile of profiles) {
+      if (!profile.monthly_salary || payslips.some((row) => row.user_id === profile.user_id && row.period === period)) continue
+      const deduction = Math.min(profile.monthly_salary, Math.max(owedBy(profile.user_id), 0))
+      payslips.push({ payslip_id: uid('ps'), user_id: profile.user_id, period, salary: profile.monthly_salary, advance_deduction: deduction, other_deductions: 0, deduction_note: null, net: profile.monthly_salary - deduction, currency: profile.salary_currency, status: 'draft', paid_on: null })
+      created += 1
+    }
+    return { created, payslips: payslips.filter((row) => row.period === period).map(publicPayslip) }
+  }],
+  ['patch', /^\/hr\/payslips\/([^/]+)$/, ['admin'], ({ params, body }) => {
+    const row = payslips.find((entry) => entry.payslip_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.status !== 'draft') throw fail(409, 'PAYSLIP_PAID')
+    const advance = body.advance_deduction === undefined ? row.advance_deduction : Number(body.advance_deduction)
+    const other = body.other_deductions === undefined ? row.other_deductions : Number(body.other_deductions)
+    if (advance > owedBy(row.user_id) || row.salary - advance - other < 0) throw fail(400, 'VALIDATION')
+    Object.assign(row, { advance_deduction: advance, other_deductions: other, deduction_note: body.deduction_note ?? row.deduction_note, net: row.salary - advance - other })
+    return { payslip: publicPayslip(row) }
+  }],
+  ['delete', /^\/hr\/payslips\/([^/]+)$/, ['admin'], ({ params }) => {
+    const index = payslips.findIndex((entry) => entry.payslip_id === params[0] && entry.status === 'draft')
+    if (index < 0) throw fail(409, 'PAYSLIP_PAID')
+    payslips.splice(index, 1)
+    return { deleted: true }
+  }],
+  ['post', /^\/hr\/payslips\/([^/]+)\/pay$/, ['admin'], ({ params, body }) => {
+    const row = payslips.find((entry) => entry.payslip_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.status !== 'draft') throw fail(409, 'PAYSLIP_PAID')
+    const account = accounts.find((entry) => entry.account_id === body.account_id)
+    if (row.net > 0 && (!account || account.currency !== row.currency)) throw fail(400, 'VALIDATION')
+    Object.assign(row, { status: 'paid', paid_on: String(body.paid_on) })
+    if (row.net > 0) officeExpenses.unshift(expense(uid('ex'), 'salaries', row.net, 0, { spent_on: String(body.paid_on), payee: nameOf(row.user_id), description: `راتب ${row.period}`, account_id: account!.account_id }))
+    return { payslip: publicPayslip(row) }
+  }],
+  ['get', /^\/hr\/leave$/, STAFF, ({ user, query }) => ({
+    leave: leaveRequests.filter((row) => (user.role === 'admin' || row.user_id === user.user_id) && (!query.status || row.status === query.status))
+      .sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending') || b.starts_on.localeCompare(a.starts_on)).map(publicLeave),
+  })],
+  ['post', /^\/hr\/leave$/, STAFF, ({ user, body }) => {
+    const startsOn = String(body.starts_on)
+    const endsOn = String(body.ends_on)
+    const days = leaveDays(startsOn, endsOn)
+    if (!days) throw fail(400, 'VALIDATION')
+    if (leaveRequests.some((row) => row.user_id === user.user_id && ['pending', 'approved'].includes(row.status) && row.starts_on <= endsOn && row.ends_on >= startsOn)) throw fail(409, 'LEAVE_OVERLAP')
+    const record = staffRecord(user)
+    if (body.leave_type === 'annual' && annualTaken(user.user_id, ['approved', 'pending']) + days > record.annual_leave_days) throw fail(409, 'LEAVE_BALANCE')
+    leaveRequests.unshift({ leave_id: uid('lv'), user_id: user.user_id, leave_type: body.leave_type as LeaveType, starts_on: startsOn, ends_on: endsOn, days, reason: (body.reason as string) || null, status: 'pending', decision_note: null, created_at: new Date().toISOString() })
+    return { leave_id: 'ok', days }
+  }],
+  ['post', /^\/hr\/leave\/([^/]+)\/decision$/, ['admin'], ({ params, body }) => {
+    const row = leaveRequests.find((entry) => entry.leave_id === params[0])
+    if (!row || row.status !== 'pending') throw fail(409, 'LEAVE_DECIDED')
+    Object.assign(row, { status: body.status, decision_note: (body.decision_note as string) || null })
+    return { leave_id: row.leave_id, status: row.status }
+  }],
+  ['post', /^\/hr\/leave\/([^/]+)\/cancel$/, STAFF, ({ user, params }) => {
+    const row = leaveRequests.find((entry) => entry.leave_id === params[0])
+    if (!row || !(row.status === 'pending' && (user.role === 'admin' || row.user_id === user.user_id)) && !(user.role === 'admin' && row.status === 'approved' && row.starts_on > dayOnly(0))) throw fail(409, 'LEAVE_DECIDED')
+    row.status = 'cancelled'
+    return { leave_id: row.leave_id, status: 'cancelled' }
   }],
 
   // powers of attorney

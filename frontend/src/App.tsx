@@ -4,7 +4,8 @@ import { GuestOnly, PATHS, Require } from './auth/auth'
 import { Forgot, Invitation, Login, LoginChooser, Onboarding, Register, ResetPassword } from './pages/Auth'
 import Landing from './pages/Landing'
 import { Today } from './pages/Office'
-import { CaseFile, Cases, Clients, Contracts, Documents, Tasks, Team } from './pages/Workspace'
+import { CaseFile, Cases, Clients, Contracts, Documents, Tasks } from './pages/Workspace'
+import { MyHr, TeamPage } from './pages/TeamHr'
 import { Messages } from './pages/Messages'
 import { OfficeRequest, Platform } from './pages/OfficeRequests'
 import { Portal } from './pages/Others'
@@ -56,7 +57,8 @@ export const App = () => (
       <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'])} />
       <Route path={`${PATHS.office}/clients/:clientId/statement`} element={office(<ClientStatement />, ['admin'])} />
       <Route path={`${PATHS.client}/statement`} element={<Require roles={['client']}><Shell><PortalStatement /></Shell></Require>} />
-      <Route path={`${PATHS.office}/team`} element={office(<Team />, ['admin'])} />
+      <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'])} />
+      <Route path={`${PATHS.office}/me`} element={office(<MyHr />)} />
 
       <Route path={`${PATHS.office}/messages`} element={office(<Messages />)} />
       <Route path={`${PATHS.client}/messages`} element={<Require roles={['client']}><Shell><Messages /></Shell></Require>} />

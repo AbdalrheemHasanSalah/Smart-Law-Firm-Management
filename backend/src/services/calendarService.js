@@ -8,6 +8,7 @@ import { officeCondition } from './officeScope.js';
  *   hearing       court sessions of the office's cases (scheduled here)
  *   appointment   client meetings, expert sessions, court visits and other appointments
  *   notice        court notices (bailiff papers), on the day they were sent
+ *   leave         approved leave of the team, on each of its days
  *   task          deadlines of tasks the office assigned (private tasks stay private)
  *   invoice       due dates of claims not yet settled
  *
@@ -85,6 +86,17 @@ async function execute(sql, parameters) {
   }
 }
 
+/** Each day of an approved leave that falls in the range shown. */
+function leaveDaysIn(row, range) {
+  const days = [];
+  const first = row.starts_on > range.from.slice(0, 10) ? row.starts_on : range.from.slice(0, 10);
+  const last = row.ends_on < range.to.slice(0, 10) ? row.ends_on : range.to.slice(0, 10);
+  for (const day = new Date(`${first}T00:00:00Z`); day.toISOString().slice(0, 10) <= last; day.setUTCDate(day.getUTCDate() + 1)) {
+    days.push(day.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
 /** The days to show: from and to are calendar dates, at most two months apart. */
 function parseRange(parameters = {}) {
   if (!parameters || Object.keys(parameters).some((key) => !['from', 'to', 'userId'].includes(key))) {
@@ -133,11 +145,12 @@ export async function listCalendar(actor, queryParameters) {
     hearing: admin ? '' : `AND (${assignedCase('h.case_id')} OR h.attended_by_user_id = $4)`,
     appointment: admin ? '' : `AND (a.user_id = $4 OR (a.case_id IS NOT NULL AND ${assignedCase('a.case_id')}))`,
     notice: admin ? '' : `AND ${assignedCase('n.case_id')}`,
+    leave: admin ? '' : 'AND l.user_id = $4',
     task: admin ? '' : `AND t.assigned_to_user_id = $4 AND (t.case_id IS NULL OR ${assignedCase('t.case_id')})`,
   };
   const noRows = { rows: [] };
 
-  const [hearings, appointments, notices, tasks, invoices] = await Promise.all([
+  const [hearings, appointments, notices, leave, tasks, invoices] = await Promise.all([
     execute(
       `SELECT h.hearing_id AS id, h.hearing_at AS at, h.hearing_type, h.court_room, h.status, h.outcome, h.notes,
               lc.case_id, lc.case_number, lc.title AS case_title, co.name AS court_name
@@ -167,6 +180,14 @@ export async function listCalendar(actor, queryParameters) {
          JOIN legal_cases lc ON lc.case_id = n.case_id AND lc.office_id = n.office_id
         WHERE n.sent_on >= $1::date AND n.sent_on < $2::date AND ${office('n')} ${scope.notice}
         ORDER BY n.sent_on`,
+      parameters
+    ),
+    execute(
+      `SELECT l.leave_id AS id, to_char(l.starts_on, 'YYYY-MM-DD') AS starts_on, to_char(l.ends_on, 'YYYY-MM-DD') AS ends_on,
+              l.leave_type, u.full_name
+         FROM leave_requests l JOIN app_users u ON u.user_id = l.user_id
+        WHERE l.status = 'approved' AND l.starts_on < $2::date AND l.ends_on >= $1::date AND ${office('l')} ${scope.leave}
+        ORDER BY l.starts_on`,
       parameters
     ),
     execute(
@@ -210,6 +231,11 @@ export async function listCalendar(actor, queryParameters) {
       title: row.recipient ? `تبليغ إلى ${row.recipient}` : 'ورقة محضر', case_id: row.case_id, case_number: row.case_number,
       details: { notice_type: row.notice_type, recipient: row.recipient, bailiff_office: row.bailiff_office },
     })),
+    ...leave.rows.flatMap((row) => leaveDaysIn(row, range).map((day) => ({
+      kind: 'leave', id: `${row.id}:${day}`, at: `${day}T00:00:00.000Z`, status: 'approved',
+      title: `إجازة ${row.full_name}`, case_id: null, case_number: null,
+      details: { leave_type: row.leave_type, full_name: row.full_name, starts_on: row.starts_on, ends_on: row.ends_on },
+    }))),
     ...tasks.rows.map((row) => ({
       kind: 'task', id: row.id, at: row.at, status: row.status,
       title: row.title, case_id: row.case_id, case_number: row.case_number,
