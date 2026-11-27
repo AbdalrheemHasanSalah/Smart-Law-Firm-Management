@@ -6,6 +6,7 @@ import { PATHS } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
 import { CLIENT_PAYMENT_METHODS, CURRENCY, formatDate, formatMoney, INVOICE_CATEGORY, INVOICE_STATE, PAYMENT_METHOD } from '@/lib/labels'
 import type { Client, Currency, Invoice, InvoiceCategory } from '@/lib/types'
+import { accountsIn, useAccounts } from '@/lib/officeFinance'
 import { FormActions, Modal, SelectField, TextArea } from './forms'
 import { Button, cn, Field } from './kit'
 import { Pill } from './Shell'
@@ -20,6 +21,9 @@ const refreshFinance = (queryClient: ReturnType<typeof useQueryClient>) => {
   void queryClient.invalidateQueries({ queryKey: ['invoices'] })
   void queryClient.invalidateQueries({ queryKey: ['finance-summary'] })
   void queryClient.invalidateQueries({ queryKey: ['statement'] })
+  void queryClient.invalidateQueries({ queryKey: ['accounts'] })
+  void queryClient.invalidateQueries({ queryKey: ['ledger'] })
+  void queryClient.invalidateQueries({ queryKey: ['profitability'] })
 }
 
 const TH = 'pe-4 pb-2 text-start text-xs font-semibold text-ink-soft'
@@ -154,10 +158,17 @@ const todayInput = () => new Date().toISOString().slice(0, 10)
 
 const RecordPayment = ({ invoice, onClose }: { invoice: Invoice | null; onClose: () => void }) => {
   const queryClient = useQueryClient()
-  const [values, setValues] = useState({ amount: '', method: 'cash', paidAt: todayInput(), reference: '' })
+  const accounts = useAccounts(invoice !== null)
+  const choices = invoice ? accountsIn(accounts.data, invoice.currency) : []
+  const [values, setValues] = useState({ amount: '', method: 'cash', paidAt: todayInput(), reference: '', account: '' })
   useEffect(() => {
-    if (invoice) setValues({ amount: String(invoice.remaining), method: 'cash', paidAt: todayInput(), reference: '' })
+    if (invoice) setValues({ amount: String(invoice.remaining), method: 'cash', paidAt: todayInput(), reference: '', account: '' })
   }, [invoice])
+  // With a single account in the invoice's currency, it is the obvious one.
+  useEffect(() => {
+    if (choices.length === 1 && !values.account) setValues((current) => ({ ...current, account: choices[0]!.account_id }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices.length])
   const set = (key: keyof typeof values) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }))
   const save = useMutation({
     mutationFn: () =>
@@ -167,6 +178,7 @@ const RecordPayment = ({ invoice, onClose }: { invoice: Invoice | null; onClose:
         // Noon of the chosen day, so the date does not move with the time zone.
         paid_at: new Date(`${values.paidAt}T12:00:00`).toISOString(),
         ...(values.reference.trim() ? { reference: values.reference.trim() } : {}),
+        ...(values.account ? { account_id: values.account } : {}),
       }),
     onSuccess: () => {
       refreshFinance(queryClient)
@@ -191,6 +203,9 @@ const RecordPayment = ({ invoice, onClose }: { invoice: Invoice | null; onClose:
           <SelectField label="طريقة الدفع" name="method" value={values.method} onChange={set('method')} options={CLIENT_PAYMENT_METHODS.map((method) => [method, PAYMENT_METHOD[method]!] as const)} />
           <Field label="تاريخ الدفع" name="paid_at" type="date" dir="ltr" max={todayInput()} required value={values.paidAt} onChange={set('paidAt')} />
           <Field label="رقم المرجع (اختياري)" name="reference" dir="ltr" value={values.reference} onChange={set('reference')} hint="رقم الشيك أو الحوالة." />
+          {choices.length > 0 && (
+            <SelectField label="دخلت إلى حساب" name="payment_account" className="sm:col-span-2" value={values.account} onChange={set('account')} options={[['', 'دون تحديد حساب'], ...choices.map((account) => [account.account_id, account.name] as const)]} />
+          )}
           <div className="sm:col-span-2">
             <FormActions error={save.isError ? messageOf(save.error) : null}>
               <Button variant="line" onClick={onClose}>

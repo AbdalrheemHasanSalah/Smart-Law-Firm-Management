@@ -73,7 +73,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     ]),
     label: 'صاحب المكتب',
   },
-  lawyer: { nav: office(), label: 'فريق المكتب' },
+  lawyer: { nav: office([{ to: `${PATHS.office}/custody`, label: 'عُهدتي', icon: Wallet }]), label: 'فريق المكتب' },
   client: {
     nav: [
       { to: PATHS.client, label: 'قضاياي', icon: Briefcase, end: true },

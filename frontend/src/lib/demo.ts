@@ -27,6 +27,7 @@ import type {
 import type { PoaType, PowerOfAttorney } from './powersOfAttorney'
 import type { HearingLogEntry } from './hearings'
 import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
+import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseCategory, FinanceAccount, LedgerEntry } from './officeFinance'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -284,6 +285,64 @@ const publicNotice = (row: DemoNotice): CourtNotice => {
   const found = cases.find((entry) => entry.case_id === row.case_id)
   return { ...row, case_number: found?.case_number ?? '—', case_title: found?.title ?? '—', created_by_name: nameOf('u-owner') }
 }
+
+/* ───────────── office finance ───────────── */
+
+type DemoAccount = Omit<FinanceAccount, 'balance'>
+const accounts: DemoAccount[] = [
+  { account_id: 'fa-1', name: 'صندوق المكتب', account_type: 'cash', currency: 'ILS', opening_balance: 2000, opened_on: dayOnly(-200), is_active: true },
+  { account_id: 'fa-2', name: 'بنك فلسطين', account_type: 'bank', currency: 'ILS', opening_balance: 15000, opened_on: dayOnly(-200), is_active: true },
+  { account_id: 'fa-3', name: 'حساب الدولار', account_type: 'bank', currency: 'USD', opening_balance: 3000, opened_on: dayOnly(-200), is_active: true },
+]
+// Client payments received into an account (the demo's claims themselves are not modelled).
+const clientPayments = [
+  { id: 'cp-1', account_id: 'fa-2', on_date: dayOnly(-60), amount: 6000, reference: 'INV-2026-0003', party: 'محمود النجار', case_id: 'k-1' },
+  { id: 'cp-2', account_id: 'fa-1', on_date: dayOnly(-25), amount: 1500, reference: 'INV-2026-0007', party: 'هبة صالح', case_id: 'k-3' },
+  { id: 'cp-3', account_id: 'fa-3', on_date: dayOnly(-15), amount: 1200, reference: 'INV-2026-0009', party: 'شركة الزيتونة للتجارة', case_id: 'k-2' },
+]
+type DemoCustody = Omit<Custody, 'spent' | 'remaining' | 'holder_name' | 'account_name'>
+const custodies: DemoCustody[] = [
+  { custody_id: 'cu-1', holder_user_id: 'u-assistant', account_id: 'fa-1', amount: 500, currency: 'ILS', issued_on: dayOnly(-10), purpose: 'رسوم ومواصلات قضايا الشهر', status: 'open', settled_on: null, returned_amount: null, return_account_id: null },
+  { custody_id: 'cu-2', holder_user_id: 'u-lawyer', account_id: 'fa-1', amount: 300, currency: 'ILS', issued_on: dayOnly(-45), purpose: 'مراجعات محكمة طوباس', status: 'settled', settled_on: dayOnly(-30), returned_amount: 120, return_account_id: 'fa-1' },
+]
+type DemoExpense = Omit<Expense, 'account_name' | 'custody_holder_name' | 'case_number' | 'created_by_name'>
+const expense = (id: string, category: ExpenseCategory, amount: number, days: number, extra: Partial<DemoExpense>): DemoExpense => ({
+  expense_id: id, category, amount, currency: 'ILS', spent_on: dayOnly(days), payee: null, description: null, account_id: null, custody_id: null,
+  case_id: null, has_receipt: false, status: 'active', created_by_user_id: 'u-owner', ...extra,
+})
+const officeExpenses: DemoExpense[] = [
+  expense('ex-1', 'rent', 2500, -55, { account_id: 'fa-2', payee: 'مالك العقار', has_receipt: true }),
+  expense('ex-2', 'utilities', 380, -40, { account_id: 'fa-2', payee: 'شركة الكهرباء' }),
+  expense('ex-3', 'transport', 180, -38, { custody_id: 'cu-2', payee: 'سيارة أجرة', case_id: 'k-4', created_by_user_id: 'u-lawyer' }),
+  expense('ex-4', 'court_costs', 150, -7, { custody_id: 'cu-1', payee: 'صندوق محكمة صلح نابلس', case_id: 'k-1', created_by_user_id: 'u-assistant', has_receipt: true }),
+  expense('ex-5', 'supplies', 95, -4, { custody_id: 'cu-1', payee: 'مكتبة الجامعة', created_by_user_id: 'u-assistant' }),
+  expense('ex-6', 'rent', 2500, -25, { account_id: 'fa-2', payee: 'مالك العقار' }),
+]
+const transfers = [{ id: 'tr-1', from: 'fa-1', to: 'fa-2', amount: 1000, on_date: dayOnly(-20), note: 'إيداع نقد في البنك' }]
+
+const custodySpent = (custodyId: string) => officeExpenses.filter((row) => row.custody_id === custodyId && row.status === 'active').reduce((sum, row) => sum + row.amount, 0)
+const publicCustody = (row: DemoCustody): Custody => ({
+  ...row, holder_name: nameOf(row.holder_user_id), account_name: accounts.find((account) => account.account_id === row.account_id)?.name ?? '—',
+  spent: custodySpent(row.custody_id), remaining: row.amount - custodySpent(row.custody_id),
+})
+const publicExpense = (row: DemoExpense): Expense => ({
+  ...row,
+  account_name: accounts.find((account) => account.account_id === row.account_id)?.name ?? null,
+  custody_holder_name: row.custody_id ? nameOf(custodies.find((custody) => custody.custody_id === row.custody_id)?.holder_user_id ?? '') : null,
+  case_number: cases.find((entry) => entry.case_id === row.case_id)?.case_number ?? null,
+  created_by_name: nameOf(row.created_by_user_id),
+})
+/** Every movement of an account, oldest first, as the backend's ledger computes it. */
+const movementsOf = (accountId: string): Omit<LedgerEntry, 'balance_after'>[] => [
+  ...clientPayments.filter((row) => row.account_id === accountId).map((row) => ({ kind: 'payment' as const, id: row.id, on_date: row.on_date, amount: row.amount, reference: row.reference, party: row.party, category: null })),
+  ...officeExpenses.filter((row) => row.account_id === accountId && row.status === 'active').map((row) => ({ kind: 'expense' as const, id: row.expense_id, on_date: row.spent_on, amount: -row.amount, reference: null, party: row.payee, category: row.category })),
+  ...custodies.filter((row) => row.account_id === accountId).map((row) => ({ kind: 'custody_issued' as const, id: row.custody_id, on_date: row.issued_on, amount: -row.amount, reference: null, party: nameOf(row.holder_user_id), category: null })),
+  ...custodies.filter((row) => row.status === 'settled' && (row.returned_amount ?? 0) > 0 && (row.return_account_id ?? row.account_id) === accountId).map((row) => ({ kind: 'custody_returned' as const, id: row.custody_id, on_date: row.settled_on!, amount: row.returned_amount!, reference: null, party: nameOf(row.holder_user_id), category: null })),
+  ...transfers.filter((row) => row.from === accountId).map((row) => ({ kind: 'transfer_out' as const, id: row.id, on_date: row.on_date, amount: -row.amount, reference: row.note, party: accounts.find((account) => account.account_id === row.to)?.name ?? null, category: null })),
+  ...transfers.filter((row) => row.to === accountId).map((row) => ({ kind: 'transfer_in' as const, id: row.id, on_date: row.on_date, amount: row.amount, reference: row.note, party: accounts.find((account) => account.account_id === row.from)?.name ?? null, category: null })),
+].sort((a, b) => a.on_date.localeCompare(b.on_date))
+const balanceOf = (account: DemoAccount) => movementsOf(account.account_id).reduce((sum, row) => sum + row.amount, account.opening_balance)
+const publicAccount = (row: DemoAccount): FinanceAccount => ({ ...row, balance: balanceOf(row) })
 
 /* ───────────── session ───────────── */
 
@@ -607,6 +666,142 @@ const routes: Route[] = [
     if (!row) throw fail(404, 'NOT_FOUND')
     row.has_attachment = true
     return { notice_id: row.notice_id, has_attachment: true }
+  }],
+
+  // office finance
+  ['get', /^\/finance\/accounts$/, ['admin'], () => ({ accounts: accounts.map(publicAccount) })],
+  ['post', /^\/finance\/accounts$/, ['admin'], ({ body }) => {
+    if (accounts.some((row) => row.name === String(body.name).trim())) throw fail(409, 'DUPLICATE')
+    const row: DemoAccount = { account_id: uid('fa'), name: String(body.name).trim(), account_type: body.account_type as AccountType, currency: body.currency as MoneyCurrency, opening_balance: Number(body.opening_balance ?? 0), opened_on: String(body.opened_on ?? dayOnly(0)), is_active: true }
+    accounts.push(row)
+    return { account: publicAccount(row) }
+  }],
+  ['patch', /^\/finance\/accounts\/([^/]+)$/, ['admin'], ({ params, body }) => {
+    const row = accounts.find((entry) => entry.account_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    Object.assign(row, body)
+    return { account: publicAccount(row) }
+  }],
+  ['get', /^\/finance\/accounts\/([^/]+)\/ledger$/, ['admin'], ({ params, query }) => {
+    const account = accounts.find((entry) => entry.account_id === params[0])
+    if (!account) throw fail(404, 'NOT_FOUND')
+    const from = String(query.from)
+    const to = String(query.to)
+    let balance = account.opening_balance
+    let before: number | null = null
+    const entries: LedgerEntry[] = []
+    for (const row of movementsOf(account.account_id)) {
+      if (row.on_date > to) break
+      if (row.on_date >= from && before === null) before = balance
+      balance += row.amount
+      if (row.on_date >= from) entries.push({ ...row, balance_after: balance })
+    }
+    return { account: publicAccount(account), from, to, balance_before: before ?? balance, balance_after: balance, entries }
+  }],
+  ['post', /^\/finance\/transfers$/, ['admin'], ({ body }) => {
+    const from = accounts.find((entry) => entry.account_id === body.from_account_id)
+    const to = accounts.find((entry) => entry.account_id === body.to_account_id)
+    if (!from || !to || from === to || from.currency !== to.currency) throw fail(400, 'VALIDATION')
+    transfers.push({ id: uid('tr'), from: from.account_id, to: to.account_id, amount: Number(body.amount), on_date: String(body.transferred_on), note: (body.note as string) ?? null })
+    return { transfer_id: 'ok' }
+  }],
+  ['get', /^\/finance\/expenses$/, STAFF, ({ user, query }) => {
+    const mine = (row: DemoExpense) => user.role === 'admin' || custodies.some((custody) => custody.custody_id === row.custody_id && custody.holder_user_id === user.user_id)
+    const rows = officeExpenses.filter((row) => mine(row) && (!query.from || row.spent_on >= String(query.from)) && (!query.to || row.spent_on <= String(query.to))
+      && (!query.category || row.category === query.category) && (!query.custodyId || row.custody_id === query.custodyId))
+      .sort((a, b) => b.spent_on.localeCompare(a.spent_on)).map(publicExpense)
+    return paginate(rows, 'expenses')
+  }],
+  ['post', /^\/finance\/expenses$/, STAFF, ({ user, body }) => {
+    if (body.account_id && user.role !== 'admin') throw fail(403, 'FORBIDDEN')
+    const custody = custodies.find((entry) => entry.custody_id === body.custody_id)
+    if (custody) {
+      if (custody.status !== 'open') throw fail(409, 'CUSTODY_SETTLED')
+      if (user.role !== 'admin' && custody.holder_user_id !== user.user_id) throw fail(404, 'NOT_FOUND')
+      if (Number(body.amount) > custody.amount - custodySpent(custody.custody_id)) throw fail(409, 'CUSTODY_INSUFFICIENT')
+    }
+    const account = accounts.find((entry) => entry.account_id === body.account_id)
+    const row = expense(uid('ex'), body.category as ExpenseCategory, Number(body.amount), 0, {
+      spent_on: String(body.spent_on), payee: (body.payee as string) || null, description: (body.description as string) || null,
+      account_id: account?.account_id ?? null, custody_id: custody?.custody_id ?? null, case_id: (body.case_id as string) || null,
+      currency: (account?.currency ?? custody?.currency ?? 'ILS'), created_by_user_id: user.user_id,
+    })
+    officeExpenses.unshift(row)
+    return { expense: publicExpense(row) }
+  }],
+  ['post', /^\/finance\/expenses\/([^/]+)\/cancel$/, STAFF, ({ params }) => {
+    const row = officeExpenses.find((entry) => entry.expense_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.custody_id && custodies.find((custody) => custody.custody_id === row.custody_id)?.status !== 'open') throw fail(409, 'CUSTODY_SETTLED')
+    row.status = 'cancelled'
+    return { expense: publicExpense(row) }
+  }],
+  ['put', /^\/finance\/expenses\/([^/]+)\/receipt$/, STAFF, ({ params }) => {
+    const row = officeExpenses.find((entry) => entry.expense_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    row.has_receipt = true
+    return { expense_id: row.expense_id, has_receipt: true }
+  }],
+  ['get', /^\/finance\/custodies$/, STAFF, ({ user, query }) => ({
+    custodies: custodies.filter((row) => (user.role === 'admin' || row.holder_user_id === user.user_id) && (!query.status || row.status === query.status))
+      .sort((a, b) => Number(a.status === 'settled') - Number(b.status === 'settled') || b.issued_on.localeCompare(a.issued_on)).map(publicCustody),
+  })],
+  ['post', /^\/finance\/custodies$/, ['admin'], ({ body }) => {
+    const account = accounts.find((entry) => entry.account_id === body.account_id)
+    if (!account) throw fail(400, 'VALIDATION')
+    const row: DemoCustody = { custody_id: uid('cu'), holder_user_id: String(body.holder_user_id), account_id: account.account_id, amount: Number(body.amount), currency: account.currency, issued_on: String(body.issued_on), purpose: (body.purpose as string) || null, status: 'open', settled_on: null, returned_amount: null, return_account_id: null }
+    custodies.unshift(row)
+    return { custody: publicCustody(row) }
+  }],
+  ['post', /^\/finance\/custodies\/([^/]+)\/settle$/, ['admin'], ({ params, body }) => {
+    const row = custodies.find((entry) => entry.custody_id === params[0])
+    if (!row) throw fail(404, 'NOT_FOUND')
+    if (row.status !== 'open') throw fail(409, 'CUSTODY_SETTLED')
+    const left = row.amount - custodySpent(row.custody_id)
+    if (left > 0 && !body.return_account_id) throw fail(400, 'VALIDATION')
+    Object.assign(row, { status: 'settled', settled_on: String(body.settled_on), returned_amount: left, return_account_id: left > 0 ? String(body.return_account_id) : null })
+    return { custody: publicCustody(row) }
+  }],
+  ['get', /^\/finance\/profitability$/, ['admin'], ({ query }) => {
+    const from = String(query.from)
+    const to = String(query.to)
+    const inRange = (day: string) => day >= from && day <= to
+    const totals: Record<string, { currency: MoneyCurrency; collected: number; spent: number; net: number }> = {}
+    const months: Record<string, { month: string; currency: MoneyCurrency; collected: number; spent: number; net: number }> = {}
+    const categories: Record<string, { category: ExpenseCategory; currency: MoneyCurrency; spent: number }> = {}
+    const add = (day: string, currency: MoneyCurrency, field: 'collected' | 'spent', value: number) => {
+      const total = (totals[currency] ??= { currency, collected: 0, spent: 0, net: 0 })
+      const month = (months[`${day.slice(0, 7)}|${currency}`] ??= { month: day.slice(0, 7), currency, collected: 0, spent: 0, net: 0 })
+      total[field] += value
+      month[field] += value
+    }
+    for (const row of clientPayments) if (inRange(row.on_date)) add(row.on_date, accounts.find((account) => account.account_id === row.account_id)!.currency, 'collected', row.amount)
+    for (const row of officeExpenses) {
+      if (row.status !== 'active' || !inRange(row.spent_on)) continue
+      add(row.spent_on, row.currency, 'spent', row.amount)
+      const key = `${row.category}|${row.currency}`
+      categories[key] = { category: row.category, currency: row.currency, spent: (categories[key]?.spent ?? 0) + row.amount }
+    }
+    for (const entry of [...Object.values(totals), ...Object.values(months)]) entry.net = entry.collected - entry.spent
+    const caseRows = cases.map((entry) => {
+      const collected = clientPayments.filter((row) => row.case_id === entry.case_id && inRange(row.on_date)).reduce((sum, row) => sum + row.amount, 0)
+      const spent = officeExpenses.filter((row) => row.case_id === entry.case_id && row.status === 'active' && inRange(row.spent_on)).reduce((sum, row) => sum + row.amount, 0)
+      const currency = (clientPayments.find((row) => row.case_id === entry.case_id) ? accounts.find((account) => account.account_id === clientPayments.find((row) => row.case_id === entry.case_id)!.account_id)!.currency : 'ILS') as MoneyCurrency
+      return { case_id: entry.case_id, case_number: entry.case_number, title: entry.title, currency, collected, spent, net: collected - spent }
+    }).filter((row) => row.collected || row.spent).sort((a, b) => b.net - a.net)
+    return {
+      from, to,
+      totals: Object.values(totals).sort((a, b) => a.currency.localeCompare(b.currency)),
+      months: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)),
+      by_category: Object.values(categories).sort((a, b) => b.spent - a.spent),
+      cases: caseRows,
+    }
+  }],
+  ['get', /^\/finance\/cases\/([^/]+)\/profitability$/, ['admin'], ({ params }) => {
+    const collected = clientPayments.filter((row) => row.case_id === params[0]).reduce((sum, row) => sum + row.amount, 0)
+    const spent = officeExpenses.filter((row) => row.case_id === params[0] && row.status === 'active').reduce((sum, row) => sum + row.amount, 0)
+    if (!collected && !spent) return { case_id: params[0], totals: [] }
+    return { case_id: params[0], totals: [{ currency: 'ILS', billed: collected, collected, spent, net: collected - spent }] }
   }],
 
   // powers of attorney

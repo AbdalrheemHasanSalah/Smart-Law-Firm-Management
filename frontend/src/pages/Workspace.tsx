@@ -33,6 +33,7 @@ import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
 import { CaseHearings, CaseNotices } from './CaseSessions'
+import { CaseProfit } from './FinanceOffice'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -694,6 +695,7 @@ const CaseFinance = ({ caseId }: { caseId: string }) => {
         <p className="text-sm text-ink-soft">الأتعاب ورسوم المحكمة والمصاريف المطالب بها في هذه القضية، وما دُفع منها.</p>
         {owner && <AddButton onClick={() => setBilling(true)}>مطالبة جديدة</AddButton>}
       </div>
+      {owner && <CaseProfit caseId={caseId} />}
       {invoices.isPending ? (
         <Loading />
       ) : invoices.isError ? (

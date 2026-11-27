@@ -290,7 +290,7 @@ export async function cancelInvoice(actor, invoiceId) {
 
 /* ───────────────────────── payments ───────────────────────── */
 
-const PAYMENT_FIELDS = new Set(['amount', 'method', 'paid_at', 'reference']);
+const PAYMENT_FIELDS = new Set(['amount', 'method', 'paid_at', 'reference', 'account_id']);
 
 /**
  * Records a payment and moves the invoice to partially paid or paid, in one statement: the
@@ -306,10 +306,21 @@ export async function recordPayment(actor, invoiceId, body) {
   const paidAt = body.paid_at === undefined || body.paid_at === null ? new Date().toISOString() : validateDate(body.paid_at, 'paid_at');
   if (Date.parse(paidAt) > Date.now() + 60_000) invalid('paid_at cannot be in the future.');
   const reference = optionalText(body, 'reference', 100);
+  const accountId = body.account_id === undefined || body.account_id === null ? null : validateUuid(body.account_id, 'account_id');
 
   const parameters = [invoiceId];
   const office = officeCondition(actor, parameters, 'i');
-  parameters.push(amount, body.method, paidAt, reference, actor.user_id);
+  // The receiving account, when named, is an open account of the office in the invoice's currency.
+  if (accountId) {
+    const account = await query(
+      `SELECT 1 FROM finance_accounts a
+         JOIN invoices i ON i.invoice_id = $1 AND i.office_id = a.office_id AND i.currency = a.currency
+        WHERE a.account_id = $3 AND a.is_active AND a.office_id = $2`,
+      [invoiceId, actor.office_id, accountId]
+    );
+    if (!account.rowCount) invalid('account_id must be an open account of the office in the invoice currency.');
+  }
+  parameters.push(amount, body.method, paidAt, reference, actor.user_id, accountId);
   let result;
   try {
     result = await query(
@@ -326,8 +337,8 @@ export async function recordPayment(actor, invoiceId, body) {
            WHERE p.invoice_id = $1 AND p.status = 'completed'
         ),
         inserted AS (
-          INSERT INTO payments (amount, payment_method, paid_at, reference_number, status, invoice_id, user_id, office_id)
-          SELECT $3::numeric, $4::text, $5::timestamptz, $6::text, 'completed', invoice.invoice_id, $7::uuid, invoice.office_id
+          INSERT INTO payments (amount, payment_method, paid_at, reference_number, status, invoice_id, user_id, office_id, account_id)
+          SELECT $3::numeric, $4::text, $5::timestamptz, $6::text, 'completed', invoice.invoice_id, $7::uuid, invoice.office_id, $8::uuid
             FROM invoice, paid
            WHERE invoice.status IN ('unpaid', 'partially_paid')
              AND paid.total + $3::numeric <= invoice.amount
@@ -372,7 +383,7 @@ export async function recordPayment(actor, invoiceId, body) {
     details: {
       subject: invoice.invoice_number,
       case_id: invoice.case_id,
-      values: { amount, currency: invoice.currency, method: body.method, reference },
+      values: { amount, currency: invoice.currency, method: body.method, reference, ...(accountId ? { account_id: accountId } : {}) },
       changes: { status: { from: row.previous_status, to: row.status } },
     },
   });

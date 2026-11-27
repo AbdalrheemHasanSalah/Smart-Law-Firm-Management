@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Printer } from 'lucide-react'
 import { useState } from 'react'
+import { oneOf, useParam } from '@/lib/useParam'
+import { AccountsTab, CustodiesTab, ExpensesTab, ProfitTab } from './FinanceOffice'
 import { Link, useParams } from 'react-router'
 import { PATHS } from '@/auth/auth'
 import { api } from '@/lib/api'
@@ -44,7 +46,47 @@ const SummaryCard = ({ summary }: { summary: CurrencySummary }) => (
   </div>
 )
 
+const FINANCE_TABS = [
+  ['claims', 'المطالبات'],
+  ['expenses', 'المصاريف'],
+  ['custodies', 'العُهد'],
+  ['accounts', 'الحسابات'],
+  ['profit', 'الربحية'],
+] as const
+type FinanceTab = (typeof FINANCE_TABS)[number][0]
+
+/** The office's money: claims on clients, its own expenses and custodies, its accounts and its results. */
 export const OfficeFinance = () => {
+  const [tabParam, setTabParam] = useParam('tab')
+  const tab = oneOf(tabParam, FINANCE_TABS.map(([key]) => key), 'claims')
+  const setTab = (key: FinanceTab) => setTabParam(key === 'claims' ? null : key)
+  return (
+    <>
+      <SheetHeader title="المالية" note="المطالبات على الموكّلين، ومصاريف المكتب وعُهده، وأرصدة حساباته، وربحيته — بكل عملة على حدة." />
+      <div role="tablist" aria-label="أقسام المالية" className="mb-6 flex flex-wrap gap-1 border-b border-rule">
+        {FINANCE_TABS.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={cn('-mb-px border-b-2 px-4 py-2 text-sm font-semibold transition-colors', tab === key ? 'border-stamp text-ink' : 'border-transparent text-ink-soft hover:text-ink')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'claims' && <ClaimsTab />}
+      {tab === 'expenses' && <ExpensesTab />}
+      {tab === 'custodies' && <CustodiesTab />}
+      {tab === 'accounts' && <AccountsTab />}
+      {tab === 'profit' && <ProfitTab />}
+    </>
+  )
+}
+
+const ClaimsTab = () => {
   const [state, setState] = useState<string>('open')
   const [billing, setBilling] = useState(false)
   const summary = useQuery({
@@ -58,15 +100,12 @@ export const OfficeFinance = () => {
   })
   return (
     <>
-      <SheetHeader
-        title="المالية"
-        note="أتعاب المكتب ورسوم المحاكم والمصاريف المطالب بها، وما حُصّل منها، بكل عملة على حدة."
-        action={
-          <Button variant="stamp" size="sm" onClick={() => setBilling(true)}>
-            مطالبة جديدة
-          </Button>
-        }
-      />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-ink-soft">أتعاب المكتب ورسوم المحاكم والمصاريف المطالب بها، وما حُصّل منها.</p>
+        <Button variant="stamp" size="sm" onClick={() => setBilling(true)}>
+          مطالبة جديدة
+        </Button>
+      </div>
       {summary.isPending ? (
         <Loading />
       ) : summary.isError ? (

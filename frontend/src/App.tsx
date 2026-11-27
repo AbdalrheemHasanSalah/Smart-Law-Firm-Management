@@ -9,6 +9,7 @@ import { Messages } from './pages/Messages'
 import { OfficeRequest, Platform } from './pages/OfficeRequests'
 import { Portal } from './pages/Others'
 import { PowersOfAttorney } from './pages/PowersOfAttorney'
+import { MyCustody } from './pages/FinanceOffice'
 import { OfficeSubscription, PlatformSubscriptions } from './pages/Subscriptions'
 import { Activity } from './pages/Activity'
 import { Calendar } from './pages/Calendar'
@@ -46,6 +47,7 @@ export const App = () => (
       <Route path={`${PATHS.office}/documents`} element={office(<Documents />)} />
       <Route path={`${PATHS.office}/contracts`} element={office(<Contracts />)} />
       <Route path={`${PATHS.office}/powers-of-attorney`} element={office(<PowersOfAttorney />)} />
+      <Route path={`${PATHS.office}/custody`} element={office(<MyCustody />)} />
       <Route path={`${PATHS.office}/tools`} element={office(<Tools />)} />
       <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />
       <Route path={`${PATHS.office}/calendar`} element={office(<Calendar />)} />

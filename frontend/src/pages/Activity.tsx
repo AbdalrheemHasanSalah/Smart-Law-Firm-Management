@@ -7,6 +7,7 @@ import { APPOINTMENT_TYPE, CASE_STATUS, CASE_TYPE, formatDate, formatMoney, form
 import { POA_TYPE } from '@/lib/powersOfAttorney'
 import { DELIVERY_STATUS, NOTICE_TYPE } from '@/lib/courtNotices'
 import { HEARING_STATUS } from '@/lib/hearings'
+import { EXPENSE_CATEGORY } from '@/lib/officeFinance'
 import type { AuditEntry } from '@/lib/types'
 import { Button, cn } from '@/ui/kit'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
@@ -36,6 +37,12 @@ const ACTION: Record<string, string> = {
   subscription_paid_online: 'دفع الاشتراك إلكترونياً',
   poa_created: 'سجّل توكيلاً',
   hearing_held: 'سجّل نتيجة جلسة',
+  account_created: 'أنشأ حساباً مالياً',
+  account_transfer: 'حوّل بين حسابين',
+  custody_issued: 'صرف عُهدة',
+  custody_settled: 'سوّى عُهدة',
+  expense_recorded: 'سجّل مصروفاً',
+  expense_cancelled: 'ألغى مصروفاً',
   hearing_postponed: 'سجّل تأجيل جلسة',
   hearing_cancelled: 'سجّل إلغاء جلسة',
   court_notice_recorded: 'سجّل ورقة محضر',
@@ -85,6 +92,13 @@ const FIELD: Record<string, string> = {
   delivered_on: 'تاريخ التبليغ',
   notes: 'ملاحظات',
   appointment_type: 'نوع الموعد',
+  category: 'البند',
+  amount: 'المبلغ',
+  currency: 'العملة',
+  spent_on: 'التاريخ',
+  opening_balance: 'الرصيد الافتتاحي',
+  spent: 'المُنفق',
+  returned_amount: 'المردود',
   poa_type: 'نوع التوكيل',
   issuing_authority: 'جهة الإصدار',
   issued_on: 'تاريخ الإصدار',
@@ -102,6 +116,9 @@ const FILTERS = [
   ['opponent', 'الخصوم'],
   ['invoice', 'المالية'],
   ['power_of_attorney', 'التوكيلات'],
+  ['expense', 'المصاريف'],
+  ['custody', 'العُهد'],
+  ['account', 'الحسابات'],
 ] as const
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T/
@@ -116,6 +133,7 @@ const readable = (field: string, value: unknown, entityType: string): string => 
     if (field === 'notice_type') return NOTICE_TYPE[value as keyof typeof NOTICE_TYPE] ?? value
     if (field === 'delivery_status') return DELIVERY_STATUS[value as keyof typeof DELIVERY_STATUS]?.text ?? value
     if (field === 'appointment_type') return APPOINTMENT_TYPE[value] ?? value
+    if (field === 'category' && entityType === 'expense') return EXPENSE_CATEGORY[value as keyof typeof EXPENSE_CATEGORY] ?? value
     if (field === 'status' && entityType === 'case' && !CASE_STATUS[value]) return HEARING_STATUS[value as keyof typeof HEARING_STATUS]?.text ?? value
     if (field === 'status') return (entityType === 'task' ? TASK_STATUS : entityType === 'invoice' ? INVOICE_STATE : CASE_STATUS)[value]?.text ?? value
     if (field === 'priority') return PRIORITY[value]?.text ?? value
