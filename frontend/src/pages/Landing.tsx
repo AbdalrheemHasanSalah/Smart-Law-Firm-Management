@@ -72,8 +72,8 @@ const PROMISES = ['بيانات كل مكتب معزولة عن غيره', 'صل
 
 const Hero = () => (
   <section className="desk relative overflow-hidden">
-    <Slideshow />
-    <div className="relative z-10 mx-auto flex min-h-[32rem] max-w-6xl items-center px-5 pt-12 pb-24 lg:min-h-[36rem]">
+    <Slideshow controls={false} />
+    <div className="relative z-10 mx-auto flex min-h-[32rem] max-w-6xl items-center px-5 py-12 lg:min-h-[36rem]">
       <motion.div
         initial="hidden"
         animate="shown"
