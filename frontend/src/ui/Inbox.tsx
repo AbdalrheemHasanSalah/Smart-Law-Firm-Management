@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { api, messageOf } from '@/lib/api'
+import { notificationLink } from '@/lib/notifications'
 import { isUnseenRequest, officeRequestPath, usePlatformOffices } from '@/lib/platform'
 import { personaOf, useAuth } from '@/auth/auth'
 import { usePreferences, useSavePreferences } from '@/lib/reminders'
@@ -88,6 +89,15 @@ export const NotificationBell = () => {
     mutationFn: () => api.delete('/notifications'),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   })
+  const markOne = useMutation({
+    mutationFn: (id: string) => api.post(`/notifications/${encodeURIComponent(id)}/read`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  })
+  /** Tapping a notification goes to its page (the link does that), closes the panel and marks it read. */
+  const openItem = (item: NotificationItem) => {
+    setOpen(false)
+    if (!item.read_at) markOne.mutate(item.notification_id)
+  }
   const hasItems = (inbox.data?.notifications.length ?? 0) > 0
   const unread = inbox.data?.unread ?? 0
 
@@ -163,16 +173,29 @@ export const NotificationBell = () => {
               {inbox.data?.notifications.length === 0 && <li className="px-4 py-8 text-center text-sm text-ink-faint">لا إشعارات بعد.</li>}
               {inbox.data?.notifications.map((item) => {
                 const Icon = ICONS[item.notification_type] ?? Bell
-                return (
-                  <li key={item.notification_id} className={cn('flex gap-3 border-b border-ink/6 px-4 py-3 last:border-0', !item.read_at && 'bg-stamp/5')}>
+                const link = notificationLink(item, persona)
+                const row = cn('flex gap-3 px-4 py-3', !item.read_at && 'bg-stamp/5')
+                const content = (
+                  <>
                     <span className={cn('mt-0.5 grid size-9 shrink-0 place-items-center rounded-full', item.read_at ? 'bg-ink/6 text-ink-soft' : 'bg-stamp text-paper')}>
                       <Icon className="size-4" aria-hidden="true" />
                     </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-ink">{item.title}</p>
-                      <p className="text-sm leading-snug text-ink-soft">{item.body}</p>
-                      <p className="mt-0.5 text-xs text-ink-faint">{timeAgo(item.created_at)}</p>
-                    </div>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-ink">{item.title}</span>
+                      <span className="block text-sm leading-snug text-ink-soft">{item.body}</span>
+                      <span className="mt-0.5 block text-xs text-ink-faint">{timeAgo(item.created_at)}</span>
+                    </span>
+                  </>
+                )
+                return (
+                  <li key={item.notification_id} className="border-b border-ink/6 last:border-0">
+                    {link ? (
+                      <Link to={link} onClick={() => openItem(item)} className={cn(row, 'transition-colors', item.read_at ? 'hover:bg-ink/4' : 'hover:bg-stamp/10')}>
+                        {content}
+                      </Link>
+                    ) : (
+                      <div className={row}>{content}</div>
+                    )}
                   </li>
                 )
               })}

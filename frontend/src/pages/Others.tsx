@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
+import { useEffect } from 'react'
+import { useLocation } from 'react-router'
 import { CalendarClock, Download, FileText } from 'lucide-react'
 import { api, DEMO } from '@/lib/api'
 import { daysUntil, documentDownloadUrl, useMyHearings, useSharedDocuments, type UpcomingHearing } from '@/lib/portal'
@@ -93,6 +95,13 @@ export const Portal = () => {
   const hearings = useMyHearings()
   const documents = useSharedDocuments()
   const nextHearing = (caseId: string) => hearings.data?.find((hearing) => hearing.case_id === caseId)
+  // A notification about one case links to "#case-<id>": scroll to that case once the list is in.
+  const { hash } = useLocation()
+  const target = hash.startsWith('#case-') ? hash.slice('#case-'.length) : null
+  useEffect(() => {
+    if (!target || !cases.data) return
+    document.getElementById(`case-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [target, cases.data])
   return (
     <>
       <SheetHeader title="قضاياي" note="ما يشاركه مكتبك معك يظهر هنا." />
@@ -108,10 +117,11 @@ export const Portal = () => {
           {cases.data.map((row, index) => (
             <motion.li
               key={row.case_id}
+              id={`case-${row.case_id}`}
               initial={{ opacity: 0, y: 40 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: 'spring', stiffness: 100, damping: 15, delay: index * 0.1 }}
-              className="relative pt-7"
+              className={cn('relative scroll-mt-24 pt-7', target === row.case_id && 'rounded-md ring-2 ring-stamp/60 ring-offset-4 ring-offset-paper')}
             >
               <span className={cn('tab-cut absolute top-0 right-6 flex h-8 w-36 items-center justify-center rounded-t-md bg-stamp-green text-sm font-semibold text-paper')} dir="ltr">
                 {row.case_number}

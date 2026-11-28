@@ -156,15 +156,15 @@ const messages: Message[] = [
 type DemoNotification = NotificationItem & { user_id: string }
 const reminderEmailsOff = new Set<string>()
 const notifications: DemoNotification[] = [
-  { notification_id: 'nt-r1', user_id: 'u-owner', title: 'توكيل ينتهي قريباً', body: 'ينتهي التوكيل رقم و-2026/0412 خلال 18 يوماً. جدّده أو استبدله حتى لا تبقى قضاياه دون توكيل ساري.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(30) },
-  { notification_id: 'nt-r2', user_id: 'u-lawyer', title: 'تذكير: جلسة غداً', body: 'لديك جلسة سماع شهود في القضية 2026/114 غداً الساعة 9:00 ص.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(45) },
-  { notification_id: 'nt-1', user_id: 'u-owner', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(95) },
-  { notification_id: 'nt-2', user_id: 'u-owner', title: 'أُنجزت مهمة', body: 'أنجز أحد أعضاء المكتب مهمة مسندة إليه.', notification_type: 'task', read_at: null, created_at: minutesAgo(400) },
-  { notification_id: 'nt-3', user_id: 'u-owner', title: 'ملاحظة جديدة على قضية', body: 'أُضيفت ملاحظة جديدة على القضية رقم 2026/114.', notification_type: 'case_note', read_at: minutesAgo(900), created_at: minutesAgo(1500) },
-  { notification_id: 'nt-4', user_id: 'u-lawyer', title: 'مهمة جديدة لك', body: 'أُسندت إليك مهمة جديدة في المكتب.', notification_type: 'task', read_at: null, created_at: minutesAgo(120) },
-  { notification_id: 'nt-5', user_id: 'u-lawyer', title: 'أُسندت إليك قضية', body: 'أُسندت إليك القضية رقم 2026/167.', notification_type: 'case_assignment', read_at: minutesAgo(2000), created_at: minutesAgo(3000) },
-  { notification_id: 'nt-6', user_id: 'u-client', title: 'تحديث جديد على قضيتك', body: 'كتب مكتبك تحديثاً جديداً على قضيتك رقم 2026/114.', notification_type: 'case_note', read_at: null, created_at: minutesAgo(60) },
-  { notification_id: 'nt-7', user_id: 'u-client', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(40) },
+  { notification_id: 'nt-r1', user_id: 'u-owner', title: 'توكيل ينتهي قريباً', body: 'ينتهي التوكيل رقم و-2026/0412 خلال 18 يوماً. جدّده أو استبدله حتى لا تبقى قضاياه دون توكيل ساري.', notification_type: 'reminder', link_path: '/office/powers-of-attorney?state=expiring', read_at: null, created_at: minutesAgo(30) },
+  { notification_id: 'nt-r2', user_id: 'u-lawyer', title: 'تذكير: جلسة غداً', body: 'لديك جلسة سماع شهود في القضية 2026/114 غداً الساعة 9:00 ص.', notification_type: 'reminder', link_path: '/office/cases/k-1?tab=hearings', read_at: null, created_at: minutesAgo(45) },
+  { notification_id: 'nt-1', user_id: 'u-owner', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', link_path: '/office/messages?with=u-lawyer', read_at: null, created_at: minutesAgo(95) },
+  { notification_id: 'nt-2', user_id: 'u-owner', title: 'أُنجزت مهمة', body: 'أنجز أحد أعضاء المكتب مهمة مسندة إليه.', notification_type: 'task', link_path: '/office/tasks', read_at: null, created_at: minutesAgo(400) },
+  { notification_id: 'nt-3', user_id: 'u-owner', title: 'ملاحظة جديدة على قضية', body: 'أُضيفت ملاحظة جديدة على القضية رقم 2026/114.', notification_type: 'case_note', link_path: '/office/cases/k-1?tab=notes', read_at: minutesAgo(900), created_at: minutesAgo(1500) },
+  { notification_id: 'nt-4', user_id: 'u-lawyer', title: 'مهمة جديدة لك', body: 'أُسندت إليك مهمة جديدة في المكتب.', notification_type: 'task', link_path: '/office/tasks', read_at: null, created_at: minutesAgo(120) },
+  { notification_id: 'nt-5', user_id: 'u-lawyer', title: 'أُسندت إليك قضية', body: 'أُسندت إليك القضية رقم 2026/167.', notification_type: 'case_assignment', link_path: '/office/cases/k-4', read_at: minutesAgo(2000), created_at: minutesAgo(3000) },
+  { notification_id: 'nt-6', user_id: 'u-client', title: 'تحديث جديد على قضيتك', body: 'كتب مكتبك تحديثاً جديداً على قضيتك رقم 2026/114.', notification_type: 'case_note', link_path: '/portal#case-k-1', read_at: null, created_at: minutesAgo(60) },
+  { notification_id: 'nt-7', user_id: 'u-client', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', link_path: '/portal/messages?with=u-lawyer', read_at: null, created_at: minutesAgo(40) },
 ]
 
 platformOffices.push(
@@ -217,7 +217,7 @@ const recordPayment = (officeId: string, amount: number, months: number, method:
   const payment: DemoPayment = { payment_id: uid('sp'), office_id: officeId, amount, currency: PLAN.currency, months, method, status: 'paid', reference, period_start: start.toISOString(), period_end: end.toISOString(), created_at: new Date().toISOString(), paid_at: new Date().toISOString(), recorded_by_name: recorder }
   subscriptionPayments.unshift(payment)
   if (officeId === OFFICE) {
-    notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', read_at: null, created_at: payment.created_at })
+    notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', link_path: '/office/subscription', read_at: null, created_at: payment.created_at })
   }
   return payment
 }
@@ -1272,6 +1272,11 @@ const routes: Route[] = [
     const before = notifications.length
     for (let index = notifications.length - 1; index >= 0; index -= 1) if (notifications[index]!.user_id === user.user_id) notifications.splice(index, 1)
     return { deleted: before - notifications.length }
+  }],
+  ['post', /^\/notifications\/([^/]+)\/read$/, ALL, ({ user, params }) => {
+    const entry = notifications.find((row) => row.notification_id === params[0] && row.user_id === user.user_id)
+    if (entry && !entry.read_at) entry.read_at = new Date().toISOString()
+    return { updated: entry ? 1 : 0 }
   }],
   ['post', /^\/notifications\/read$/, ALL, ({ user }) => {
     const now = new Date().toISOString()

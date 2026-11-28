@@ -129,13 +129,15 @@ async function plan(event, payload, query) {
     ]);
     return { label: `رقم ${found.case_number}`, clients, staff, owner };
   };
-  const forStaff = (people, title, body, type) => ({
+  // `tab` opens the case file on the part that changed (notes, documents…).
+  const forStaff = (people, title, body, type, tab) => ({
     people: audience([people], actorUserId), title, body, type, officeId,
-    path: `/office/cases/${caseId}`, button: 'افتح ملف القضية',
+    path: `/office/cases/${caseId}${tab ? `?tab=${tab}` : ''}`, button: 'افتح ملف القضية',
   });
+  // The portal lists every case of the client; the anchor scrolls to this one.
   const forClients = (people, title, body, type) => ({
     people: audience([people], actorUserId), title, body, type, officeId,
-    path: '/portal', button: 'افتح بوابة الموكّل',
+    path: `/portal#case-${caseId}`, button: 'افتح بوابة الموكّل',
   });
 
   switch (event) {
@@ -154,7 +156,7 @@ async function plan(event, payload, query) {
       // internal notes concern the office owner only; team notes add the assigned staff;
       // only a client-visible note reaches the client.
       const staff = payload.visibility === 'internal' ? context.owner : [...context.staff, ...context.owner];
-      const messages = [forStaff(staff, 'ملاحظة جديدة على قضية', `أُضيفت ملاحظة جديدة على القضية ${context.label}.`, 'case_note')];
+      const messages = [forStaff(staff, 'ملاحظة جديدة على قضية', `أُضيفت ملاحظة جديدة على القضية ${context.label}.`, 'case_note', 'notes')];
       if (payload.visibility === 'client_visible') {
         messages.push(forClients(context.clients, 'تحديث جديد على قضيتك', `كتب مكتبك تحديثاً جديداً على قضيتك ${context.label}.`, 'case_note'));
       }
@@ -164,7 +166,7 @@ async function plan(event, payload, query) {
       const context = await caseContext();
       if (!context) return [];
       const staff = payload.accessLevel === 'restricted' ? context.owner : [...context.staff, ...context.owner];
-      const messages = [forStaff(staff, 'مستند جديد في قضية', `رُفع مستند جديد إلى القضية ${context.label}.`, 'case_document')];
+      const messages = [forStaff(staff, 'مستند جديد في قضية', `رُفع مستند جديد إلى القضية ${context.label}.`, 'case_document', 'documents')];
       if (payload.accessLevel === 'authorized_users' && payload.clientId) {
         const shared = context.clients.filter((client) => client.client_id === payload.clientId);
         messages.push(forClients(shared, 'مستند جديد في قضيتك', `شارك مكتبك معك مستنداً جديداً في قضيتك ${context.label}.`, 'case_document'));
@@ -242,10 +244,12 @@ async function plan(event, payload, query) {
     }
     case 'message.received': {
       const receiver = await rows(MEMBER_OF_OFFICE, [officeId, payload.userId]);
+      const inbox = payload.receiverRole === 'client' ? '/portal/messages' : '/office/messages';
       return [{
         people: audience([receiver], actorUserId), officeId, type: 'message',
         title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${payload.senderName ?? 'أحد أعضاء المكتب'}.`,
-        path: payload.receiverRole === 'client' ? '/portal/messages' : '/office/messages', button: 'افتح الرسائل',
+        // Opens the conversation with the sender, not just the list of contacts.
+        path: actorUserId ? `${inbox}?with=${encodeURIComponent(actorUserId)}` : inbox, button: 'افتح الرسائل',
       }];
     }
     case 'subscription.paid': {
@@ -356,10 +360,11 @@ export async function notify(event, payload, { query = databaseQuery, sendMail =
     const email = notificationEmail({ title, body, url: appUrl(path), button });
     for (const person of people) {
       if (officeId) {
+        // The same page the email links to, so tapping the notification in the app opens it.
         await query(
-          `INSERT INTO notifications (title, body, notification_type, user_id, office_id)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [title, body, type, person.user_id, officeId]
+          `INSERT INTO notifications (title, body, notification_type, user_id, office_id, link_path)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [title, body, type, person.user_id, officeId, path]
         );
       }
       if (await sendMail({ to: person.email, ...email })) sent += 1;

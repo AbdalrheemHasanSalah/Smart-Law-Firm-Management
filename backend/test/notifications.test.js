@@ -50,7 +50,7 @@ test('a status change reaches the client, the assigned staff and the owner, but 
   const toClient = mails.find((mail) => mail.to === client.email);
   assert.match(toClient.text, /2026\/114/);
   assert.match(toClient.text, /مغلقة/);
-  assert.match(toClient.text, /\/portal$/);
+  assert.ok(toClient.text.endsWith(`/portal#case-${caseId}`));
   // every lookup is scoped to the acting office
   for (const { sql, parameters } of calls.filter(({ sql }) => sql.includes('FROM involves') || sql.includes('FROM assigned_to'))) {
     assert.deepEqual(parameters, [caseId, officeId], sql);
@@ -137,6 +137,24 @@ test('office notifications are also stored for the in-app list, per recipient an
   const inserts = calls.filter(({ sql }) => sql.includes('INSERT INTO notifications'));
   assert.equal(inserts.length, 3);
   for (const { parameters } of inserts) assert.equal(parameters[4], officeId);
+});
+
+test('each stored notification keeps the page it opens: the case file, or the case in the portal', async () => {
+  const { calls, dependencies } = harness();
+  await notify('case.note_added', { officeId, caseId, visibility: 'client_visible', actorUserId: 'nobody' }, dependencies);
+  const pages = calls
+    .filter(({ sql }) => sql.includes('INSERT INTO notifications'))
+    .map(({ parameters }) => [parameters[3], parameters[5]]);
+  assert.deepEqual(pages.sort(), [
+    ['u-client', `/portal#case-${caseId}`],
+    ['u-lawyer', `/office/cases/${caseId}?tab=notes`],
+    ['u-owner', `/office/cases/${caseId}?tab=notes`],
+  ]);
+
+  const document = harness();
+  await notify('case.document_added', { officeId, caseId, accessLevel: 'case_team', actorUserId: 'nobody' }, document.dependencies);
+  const toLawyer = document.calls.find(({ sql, parameters }) => sql.includes('INSERT INTO notifications') && parameters[3] === 'u-lawyer');
+  assert.equal(toLawyer.parameters[5], `/office/cases/${caseId}?tab=documents`);
 });
 
 test('an unknown case or event sends nothing', async () => {

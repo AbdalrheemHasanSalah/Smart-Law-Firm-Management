@@ -6,6 +6,7 @@ import {
   getThread,
   listContacts,
   listNotifications,
+  markNotificationRead,
   markNotificationsRead,
   sendMessage,
 } from '../services/inboxService.js';
@@ -25,6 +26,7 @@ const handle = (action, status = 200) => async (request, response, next) => {
 
 router.get('/notifications', handle((request) => listNotifications(request.user)));
 router.post('/notifications/read', handle((request) => markNotificationsRead(request.user)));
+router.post('/notifications/:notificationId/read', handle((request) => markNotificationRead(request.user, request.params.notificationId)));
 router.delete('/notifications', handle((request) => clearNotifications(request.user)));
 
 router.get('/messages/contacts', handle(async (request) => ({ contacts: await listContacts(request.user) })));

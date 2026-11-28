@@ -174,7 +174,7 @@ export async function listNotifications(actor, { query = databaseQuery } = {}) {
   const parameters = [actor.office_id, actor.user_id];
   const [list, unread] = await Promise.all([
     query(
-      `SELECT notification_id, title, body, notification_type, read_at, created_at
+      `SELECT notification_id, title, body, notification_type, link_path, read_at, created_at
        FROM notifications
        WHERE office_id = $1 AND user_id = $2
        ORDER BY created_at DESC, notification_id
@@ -198,6 +198,20 @@ export async function clearNotifications(actor, { query = databaseQuery } = {}) 
     [actor.office_id, actor.user_id]
   );
   return { deleted: result.rowCount ?? 0 };
+}
+
+/** Marks one of the actor's notifications read (it was opened). Someone else's is left alone. */
+export async function markNotificationRead(actor, notificationId, { query = databaseQuery } = {}) {
+  assertActor(actor);
+  if (typeof notificationId !== 'string' || !UUID_PATTERN.test(notificationId)) {
+    throw new InboxServiceError(400, 'notificationId must be a valid UUID.');
+  }
+  const result = await query(
+    `UPDATE notifications SET read_at = NOW()
+     WHERE notification_id = $1 AND office_id = $2 AND user_id = $3 AND read_at IS NULL`,
+    [notificationId, actor.office_id, actor.user_id]
+  );
+  return { updated: result.rowCount ?? 0 };
 }
 
 export async function markNotificationsRead(actor, { query = databaseQuery } = {}) {

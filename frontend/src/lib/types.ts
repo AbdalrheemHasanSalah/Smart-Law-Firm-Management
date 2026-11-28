@@ -306,6 +306,8 @@ export type NotificationItem = {
   title: string
   body: string
   notification_type: string
+  /** The page it opens, set by the server; missing on notifications created before links existed. */
+  link_path?: string | null
   read_at: string | null
   created_at: string
 }

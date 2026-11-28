@@ -275,6 +275,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     title VARCHAR(200) NOT NULL,
     body TEXT NOT NULL,
     notification_type VARCHAR(50) NOT NULL,
+    -- the page the notification opens (an internal path, set by the server)
+    link_path VARCHAR(300),
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
