@@ -106,7 +106,9 @@ CREATE TABLE IF NOT EXISTS law_offices (
     -- Paid (or trial) access runs until this moment; NULL means no subscription is tracked.
     subscription_ends_at TIMESTAMPTZ,
     -- The subscription_ends_at value a renewal reminder was last sent for.
-    subscription_reminder_sent_for TIMESTAMPTZ
+    subscription_reminder_sent_for TIMESTAMPTZ,
+    -- When a platform administrator first opened this office's request (NULL: not opened yet).
+    platform_seen_at TIMESTAMPTZ
 );
 
 -- Office subscription payments: recorded by the platform owner, or paid online by the office.

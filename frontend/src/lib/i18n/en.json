@@ -1565,5 +1565,12 @@
   "مستندات شاركها مكتبك معك": "Documents your office shared with you",
   "المشاركة": "Sharing",
   "شارك مع الموكّل": "Share with client",
-  "بعد يومين": "in 2 days"
+  "بعد يومين": "in 2 days",
+  "مسح الكل": "Clear all",
+  "طلب مكتب جديد": "New office request",
+  "لا طلبات جديدة.": "No new requests.",
+  "لم تفتحها بعد": "Not opened yet",
+  "بانتظار قرارك": "Awaiting your decision",
+  "طلب جديد واحد لم تفتحه بعد": "One new request you haven't opened yet",
+  "طلبان جديدان لم تفتحهما بعد": "Two new requests you haven't opened yet"
 }

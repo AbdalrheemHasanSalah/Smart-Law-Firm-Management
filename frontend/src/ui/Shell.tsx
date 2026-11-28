@@ -31,7 +31,8 @@ import { PATHS, personaOf, useAuth, type Persona } from '@/auth/auth'
 import { DEMO } from '@/lib/api'
 import { formatDay, ROLE } from '@/lib/labels'
 import { SubscriptionBanner, SubscriptionLocked } from '@/pages/Subscriptions'
-import { NotificationBell, useUnreadMessages } from './Inbox'
+import { isUnseenRequest, usePlatformOffices } from '@/lib/platform'
+import { NotificationBell, PlatformBell, useUnreadMessages } from './Inbox'
 import { PreferenceControls } from './Preferences'
 import { cn, Logo, type StampTone } from './kit'
 
@@ -40,7 +41,7 @@ type NavItem = {
   label: string
   icon: LucideIcon
   end?: boolean
-  badge?: 'messages'
+  badge?: 'messages' | 'requests'
   /** Also highlighted on pages under this path (for an entry that otherwise matches exactly). */
   within?: string
 }
@@ -65,7 +66,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
 const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
   platform: {
     nav: [
-      { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/` },
+      { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/`, badge: 'requests' },
       { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
       { to: `${PATHS.platform}/support`, label: 'رسائل الدعم', icon: Headset },
     ],
@@ -155,7 +156,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
                   )}
                   <Icon className="relative size-[1.15rem] transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
                   <span className="relative flex-1">{text}</span>
-                  {badge && <UnreadBadge active={isActive} />}
+                  {badge && <NavBadge kind={badge} active={isActive || isWithin(within)} />}
                 </>
               )}
             </NavLink>
@@ -189,7 +190,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
             </div>
             <div className="flex items-center gap-2">
               <PreferenceControls />
-              {hasInbox && <NotificationBell />}
+              {hasInbox ? <NotificationBell /> : <PlatformBell />}
             <button type="button" onClick={signOut} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink lg:hidden">
               <LogOut className="size-4 rtl:-scale-x-100" aria-hidden="true" />
               خروج
@@ -209,7 +210,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
               >
                 <Icon className="size-4" aria-hidden="true" />
                 {text}
-                {badge && <UnreadBadge active />}
+                {badge && <NavBadge kind={badge} active />}
               </NavLink>
             ))}
           </nav>
@@ -239,9 +240,17 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   )
 }
 
-/** Count of unread direct messages beside the "messages" entry. */
-const UnreadBadge = ({ active }: { active: boolean }) => {
-  const unread = useUnreadMessages().data ?? 0
+/** A count beside a side-bar entry: unread messages, or office requests not opened yet. */
+const NavBadge = ({ kind, active }: { kind: 'messages' | 'requests'; active: boolean }) =>
+  kind === 'messages' ? <MessagesBadge active={active} /> : <RequestsBadge active={active} />
+
+const MessagesBadge = ({ active }: { active: boolean }) => <CountBadge count={useUnreadMessages().data ?? 0} active={active} />
+
+const RequestsBadge = ({ active }: { active: boolean }) => (
+  <CountBadge count={(usePlatformOffices().data ?? []).filter(isUnseenRequest).length} active={active} />
+)
+
+const CountBadge = ({ count: unread, active }: { count: number; active: boolean }) => {
   if (!unread) return null
   return (
     <span className={cn('relative grid min-w-5 place-items-center rounded-full px-1 text-[0.65rem] leading-5 font-bold', active ? 'bg-paper text-stamp' : 'bg-stamp text-paper')}>

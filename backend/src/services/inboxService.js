@@ -190,6 +190,16 @@ export async function listNotifications(actor, { query = databaseQuery } = {}) {
   return { notifications: list.rows, unread: unread.rows[0]?.unread ?? 0 };
 }
 
+/** "Clear all": removes the actor's notifications in the active office. */
+export async function clearNotifications(actor, { query = databaseQuery } = {}) {
+  assertActor(actor);
+  const result = await query(
+    'DELETE FROM notifications WHERE office_id = $1 AND user_id = $2',
+    [actor.office_id, actor.user_id]
+  );
+  return { deleted: result.rowCount ?? 0 };
+}
+
 export async function markNotificationsRead(actor, { query = databaseQuery } = {}) {
   assertActor(actor);
   const result = await query(

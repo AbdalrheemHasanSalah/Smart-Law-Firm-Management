@@ -280,6 +280,8 @@ export type PlatformOffice = {
   owner_email: string
   owner_account_status: string
   owner_bar_number: string | null
+  /** When a platform administrator first opened the request; null while it is unread. */
+  platform_seen_at?: string | null
 }
 
 export type Contact = {

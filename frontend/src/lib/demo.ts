@@ -1231,6 +1231,18 @@ const routes: Route[] = [
     return { checkout_url: `${location.origin}/office/subscription?payment=success` }
   }],
 
+  // platform: opened requests
+  ['post', /^\/platform\/offices\/seen$/, ['platform'], () => {
+    const now = new Date().toISOString()
+    for (const office of platformOffices) if (office.status === 'pending' && !office.platform_seen_at) office.platform_seen_at = now
+    return { updated: 1 }
+  }],
+  ['post', /^\/platform\/offices\/([^/]+)\/seen$/, ['platform'], ({ params }) => {
+    const office = platformOffices.find((entry) => entry.office_id === params[0])
+    if (office && !office.platform_seen_at) office.platform_seen_at = new Date().toISOString()
+    return { updated: office ? 1 : 0 }
+  }],
+
   // platform
   ['get', /^\/platform\/offices$/, ['platform'], () => ({ offices: platformOffices })],
   ['patch', /^\/platform\/offices\/([^/]+)$/, ['platform'], ({ params, body }) => {
@@ -1255,6 +1267,11 @@ const routes: Route[] = [
   ['get', /^\/notifications$/, ALL, ({ user }) => {
     const mine = notifications.filter((entry) => entry.user_id === user.user_id).sort((a, b) => b.created_at.localeCompare(a.created_at))
     return { notifications: mine, unread: mine.filter((entry) => !entry.read_at).length }
+  }],
+  ['delete', /^\/notifications$/, ALL, ({ user }) => {
+    const before = notifications.length
+    for (let index = notifications.length - 1; index >= 0; index -= 1) if (notifications[index]!.user_id === user.user_id) notifications.splice(index, 1)
+    return { deleted: before - notifications.length }
   }],
   ['post', /^\/notifications\/read$/, ALL, ({ user }) => {
     const now = new Date().toISOString()

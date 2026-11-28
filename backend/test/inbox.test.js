@@ -145,3 +145,34 @@ test('a new message notifies its receiver with a link to their own area', async 
   assert.match(mails[0].text, /Lina/);
   assert.match(mails[0].text, /\/portal\/messages$/);
 });
+
+test('clear all removes only the actor notifications in the active office', async () => {
+  const { clearNotifications } = await import('../src/services/inboxService.js');
+  const calls = [];
+  const query = async (sql, parameters) => {
+    calls.push({ sql, parameters });
+    return { rowCount: 3, rows: [] };
+  };
+  assert.deepEqual(await clearNotifications(actor('lawyer'), { query }), { deleted: 3 });
+  assert.match(calls[0].sql, /^DELETE FROM notifications WHERE office_id = \$1 AND user_id = \$2$/);
+  assert.deepEqual(calls[0].parameters, [officeId, me]);
+  await assert.rejects(clearNotifications({ user_id: me, role: 'lawyer' }, { query }), { status: 403 });
+});
+
+test('opening an office request marks it seen once; clear all marks every pending request', async () => {
+  const { markOfficesSeen } = await import('../src/services/platformService.js');
+  const platformAdmin = { user_id: me, is_platform_admin: true };
+  const calls = [];
+  const query = async (sql, parameters) => {
+    calls.push({ sql, parameters });
+    return { rowCount: 1, rows: [] };
+  };
+  assert.deepEqual(await markOfficesSeen(platformAdmin, other, { query }), { updated: 1 });
+  assert.match(calls[0].sql, /WHERE office_id = \$1 AND platform_seen_at IS NULL/);
+  assert.deepEqual(calls[0].parameters, [other]);
+  await markOfficesSeen(platformAdmin, null, { query });
+  assert.match(calls[1].sql, /WHERE status = 'pending' AND platform_seen_at IS NULL/);
+  await assert.rejects(markOfficesSeen({ user_id: me, is_platform_admin: false }, other, { query }), { status: 403 });
+  await assert.rejects(markOfficesSeen(platformAdmin, 'not-a-uuid', { query }), { status: 400 });
+  assert.equal(calls.length, 2);
+});

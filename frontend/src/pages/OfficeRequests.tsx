@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, BadgeCheck, Building2, ChevronLeft, Mail, MapPin, Phone, Search, ScrollText, UserRound, X, type LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { PATHS } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
+import { isUnseenRequest, officeRequestPath, usePlatformOffices } from '@/lib/platform'
 import { useParam } from '@/lib/useParam'
 import { formatDate, OFFICE_STATUS } from '@/lib/labels'
 import type { OfficeStatus, PlatformOffice } from '@/lib/types'
@@ -110,13 +111,10 @@ const Decide = ({ office }: { office: PlatformOffice }) => {
   )
 }
 
-const useOffices = () =>
-  useQuery({
-    queryKey: ['platform-offices'],
-    queryFn: async () => (await api.get<{ offices: PlatformOffice[] }>('/platform/offices')).data.offices,
-  })
+const useOffices = usePlatformOffices
 
-export const officeRequestPath = (officeId: string) => `${PATHS.platform}/offices/${encodeURIComponent(officeId)}`
+const requestsText = (count: number) =>
+  count === 1 ? 'طلب واحد' : count === 2 ? 'طلبان' : `${count} طلبات`
 
 /* ───────────────────────── the list ───────────────────────── */
 
@@ -125,6 +123,7 @@ export const Platform = () => {
   const offices = useOffices()
   const all = offices.data ?? []
   const pendingCount = all.filter((office) => office.status === 'pending').length
+  const unseenCount = all.filter(isUnseenRequest).length
   const [tabParam, setTab] = useParam('tab')
   const [filter, setFilter] = useState('')
   // Open on the new requests when there are any.
@@ -141,9 +140,15 @@ export const Platform = () => {
         title="طلبات المكاتب"
         note={
           offices.data
-            ? pendingCount
-              ? `${pendingCount === 1 ? 'طلب جديد واحد' : pendingCount === 2 ? 'طلبان جديدان' : `${pendingCount} طلبات جديدة`} بانتظار قرارك`
-              : 'لا طلبات جديدة الآن'
+            ? unseenCount
+              ? unseenCount === 1
+                ? 'طلب جديد واحد لم تفتحه بعد'
+                : unseenCount === 2
+                  ? 'طلبان جديدان لم تفتحهما بعد'
+                  : `${unseenCount} طلبات جديدة لم تفتحها بعد`
+              : pendingCount
+                ? `لا طلبات جديدة · ${requestsText(pendingCount)} بانتظار قرارك`
+                : 'لا طلبات جديدة الآن'
             : undefined
         }
       />
@@ -158,7 +163,10 @@ export const Platform = () => {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="نوع الطلبات">
               {TABS.map(([key, label]) => {
-                const count = all.filter((office) => inTab(key, office.status)).length
+                // Counts are things still to do: new requests not opened yet, and (on الكل) requests
+                // waiting for a decision. Opening lowers the first, approving or rejecting the second.
+                // Approved and closed offices need nothing, so their tabs carry no number.
+                const count = key === 'pending' ? unseenCount : key === 'all' ? pendingCount : 0
                 const on = activeTab === key
                 return (
                   <button
@@ -169,7 +177,14 @@ export const Platform = () => {
                     className={cn('flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors', on ? 'bg-ink text-paper' : 'bg-ink/6 text-ink-soft hover:text-ink')}
                   >
                     {label}
-                    <span className={cn('rounded-full px-1.5 text-xs', on ? 'bg-paper/20' : key === 'pending' && count ? 'bg-stamp text-paper' : 'bg-ink/10')}>{count}</span>
+                    {count > 0 && (
+                      <span
+                        title={key === 'pending' ? 'لم تفتحها بعد' : 'بانتظار قرارك'}
+                        className={cn('rounded-full px-1.5 text-xs', key === 'pending' ? 'bg-stamp text-paper' : on ? 'bg-paper/20' : 'bg-ink/10')}
+                      >
+                        {count}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -197,7 +212,8 @@ export const Platform = () => {
           ) : (
             <ul className="divide-y divide-ink/8 overflow-hidden rounded-xl border border-ink/10" aria-label="المكاتب">
               {shown.map((office, index) => {
-                const isNew = office.status === 'pending'
+                const isNew = isUnseenRequest(office)
+                const waiting = office.status === 'pending'
                 const status = OFFICE_STATUS[office.status]!
                 return (
                   <motion.li key={office.office_id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04 }}>
@@ -207,15 +223,15 @@ export const Platform = () => {
                         {isNew && <span aria-hidden="true" className="absolute -top-1 -left-1 size-3 rounded-full border-2 border-white bg-stamp" />}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-lg font-semibold text-ink group-hover:text-stamp">{office.name}</span>
+                        <span className={cn('block truncate text-lg text-ink group-hover:text-stamp', isNew ? 'font-bold' : 'font-semibold')}>{office.name}</span>
                         <span className="mt-0.5 block truncate text-sm text-ink-soft">
                           {office.owner_name}
                           {office.city && ` · ${office.city}`}
                         </span>
                       </span>
-                      <span className="hidden shrink-0 text-sm text-ink-faint sm:block">{isNew ? `قدّم الطلب ${timeAgo(office.created_at)}` : formatDate(office.created_at)}</span>
+                      <span className="hidden shrink-0 text-sm text-ink-faint sm:block">{waiting ? `قدّم الطلب ${timeAgo(office.created_at)}` : formatDate(office.created_at)}</span>
                       <span className="hidden shrink-0 sm:block">
-                        <Pill tone={status.tone}>{isNew ? 'طلب جديد' : status.text}</Pill>
+                        <Pill tone={isNew ? 'red' : status.tone}>{isNew ? 'طلب جديد' : waiting ? 'بانتظار القرار' : status.text}</Pill>
                       </span>
                       <ChevronLeft className="size-5 shrink-0 text-ink-faint transition-transform rtl:group-hover:-translate-x-1 ltr:group-hover:translate-x-1 ltr:-scale-x-100" aria-hidden="true" />
                     </Link>
@@ -237,6 +253,14 @@ export const OfficeRequest = () => {
   const { officeId = '' } = useParams()
   const offices = useOffices()
   const office = offices.data?.find((entry) => entry.office_id === officeId)
+  const queryClient = useQueryClient()
+  // Opening a new request marks it read, once, so the counts and the bell go down.
+  const marked = useRef<string | null>(null)
+  useEffect(() => {
+    if (!office || !isUnseenRequest(office) || marked.current === office.office_id) return
+    marked.current = office.office_id
+    void api.post(`/platform/offices/${office.office_id}/seen`).then(() => queryClient.invalidateQueries({ queryKey: ['platform-offices'] }))
+  }, [office, queryClient])
 
   const back = (
     <Link to={PATHS.platform} className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-soft hover:text-ink">

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
+  clearNotifications,
   countUnreadMessages,
   getThread,
   listContacts,
@@ -24,6 +25,7 @@ const handle = (action, status = 200) => async (request, response, next) => {
 
 router.get('/notifications', handle((request) => listNotifications(request.user)));
 router.post('/notifications/read', handle((request) => markNotificationsRead(request.user)));
+router.delete('/notifications', handle((request) => clearNotifications(request.user)));
 
 router.get('/messages/contacts', handle(async (request) => ({ contacts: await listContacts(request.user) })));
 router.get('/messages/unread-count', handle(async (request) => ({ unread: await countUnreadMessages(request.user) })));
