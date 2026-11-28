@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ListPlus, Printer, ShieldCheck, Sparkles } from 'lucide-react'
+import { ChevronDown, ListPlus, ShieldCheck, Sparkles } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
@@ -29,6 +29,7 @@ import type { CaseRelationships } from '@/lib/types'
 import { FormActions, SelectField, TextArea } from '@/ui/forms'
 import { Button, cn, Field } from '@/ui/kit'
 import { Empty, Failed, Loading, Pill } from '@/ui/Shell'
+import { PrintButton, PrintSheet, usePrintWithCode } from '@/ui/PrintSheet'
 
 /* ───────────────────────── a result ───────────────────────── */
 
@@ -132,11 +133,22 @@ const ResultView = ({ analysis, caseId }: { analysis: Analysis; caseId: string }
   const { result } = analysis
   const unverified = unverifiedCount(result)
   const redaction = redactionNote(analysis.redaction)
+  const printing = usePrintWithCode('analysis')
+  const { reset } = printing
+  useEffect(() => reset(), [analysis.analysis_id, reset])
   return (
-    <article className="print-sheet paper rounded-md p-6">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-ink pb-3">
+    <div className="space-y-3">
+    <div className="no-print flex justify-end">
+      <PrintButton onPrint={() => void printing.print()} busy={printing.busy} error={printing.error} label="اطبع" />
+    </div>
+    <PrintSheet
+      kind="analysis"
+      title={spec.title}
+      sheetRef={printing.sheetRef}
+      code={printing.code}
+      subtitle={
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-2xl text-ink">{spec.title}</h3>
           <p className="mt-0.5 text-xs text-ink-soft">
             {formatDate(analysis.created_at)} {formatTime(analysis.created_at)}
             {analysis.created_by.full_name ? ` · ${analysis.created_by.full_name}` : ''}
@@ -145,15 +157,11 @@ const ResultView = ({ analysis, caseId }: { analysis: Analysis; caseId: string }
           {analysis.question && <p className="mt-1 text-xs text-ink-soft">السؤال أو التركيز: {analysis.question}</p>}
           {result.ruling && <p className="mt-1 text-xs text-ink-soft">الحكم من المكتبة: {result.ruling.subject ?? result.ruling.case_number}</p>}
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {result.assessment && <Pill tone={ASSESSMENT[result.assessment.level].tone}>{ASSESSMENT[result.assessment.level].text}</Pill>}
-          <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-1 text-xs font-semibold text-ink-soft hover:text-ink print:hidden">
-            <Printer className="size-3.5" aria-hidden="true" />
-            اطبع
-          </button>
-        </div>
-      </header>
-      {result.summary && <p className="mt-4 leading-relaxed text-ink">{result.summary}</p>}
+        {result.assessment && <Pill tone={ASSESSMENT[result.assessment.level].tone}>{ASSESSMENT[result.assessment.level].text}</Pill>}
+      </div>
+      }
+    >
+      {result.summary && <p className="leading-relaxed text-ink">{result.summary}</p>}
       {result.assessment?.reasoning && <p className="mt-2 text-sm leading-relaxed text-ink-soft">{result.assessment.reasoning}</p>}
       {result.translation !== undefined && (
         <section className="mt-4 rounded-md border border-rule bg-paper p-4">
@@ -172,7 +180,7 @@ const ResultView = ({ analysis, caseId }: { analysis: Analysis; caseId: string }
         ),
       )}
       {analysis.tool === 'minutes' && <MinutesActions analysis={analysis} caseId={caseId} />}
-      <footer className="mt-5 space-y-1 border-t border-rule pt-3 text-xs text-ink-faint">
+      <div className="mt-5 space-y-1 border-t border-rule pt-3 text-xs text-ink-faint">
         {unverified > 0 && (
           <p className="font-semibold text-stamp">
             {unverified === 1 ? 'بند واحد غير موثّق: تحقّق منه قبل الاعتماد عليه.' : `${unverified} بنود غير موثّقة: تحقّق منها قبل الاعتماد عليها.`}
@@ -180,8 +188,9 @@ const ResultView = ({ analysis, caseId }: { analysis: Analysis; caseId: string }
         )}
         {redaction && <p className="flex items-center gap-1"><ShieldCheck className="size-3.5 text-stamp-green" aria-hidden="true" />{redaction}</p>}
         <p>ورقة عمل يراجعها المحامي، لا تظهر للموكّل. مرّر المؤشر على أي مرجع لترى نصه.</p>
-      </footer>
-    </article>
+      </div>
+    </PrintSheet>
+    </div>
   )
 }
 

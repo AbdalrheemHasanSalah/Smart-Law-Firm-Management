@@ -25,12 +25,14 @@ import hrRoutes from './hrRoutes.js';
 import publicPageRoutes from './publicPageRoutes.js';
 import legalLibraryRoutes from './legalLibraryRoutes.js';
 import caseAnalysisRoutes from './caseAnalysisRoutes.js';
+import draftingRoutes from './draftingRoutes.js';
 
 const router = Router();
 
 router.use(publicPageRoutes);
 router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, subscriptionRoutes, conflictRoutes, supportRoutes);
 router.use(legalLibraryRoutes);
+router.use(draftingRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseAnalysisRoutes);
 router.use('/cases', caseRoutes);

@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Printer, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { FileText, Sparkles } from 'lucide-react'
+import { useState, type RefObject } from 'react'
 import { api, messageOf } from '@/lib/api'
 import { formatDate, formatTime } from '@/lib/labels'
 import type { HearingPrep as Prep, HearingPrepRecord, PrepPoint } from '@/lib/types'
 import { TextArea } from './forms'
 import { Button, cn, Field, Stamp } from './kit'
 import { Empty, Failed, Loading } from './Shell'
+import { PrintButton, PrintSheet, usePrintWithCode } from './PrintSheet'
 
 const SECTIONS: { key: keyof Pick<Prep, 'key_facts' | 'pending_items' | 'documents_to_bring' | 'questions_for_client' | 'risks' | 'next_steps'>; title: string }[] = [
   { key: 'key_facts', title: 'الوقائع المهمة' },
@@ -43,14 +44,18 @@ const Point = ({ point, sources }: { point: PrepPoint; sources: Prep['sources'] 
 )
 
 /** The sheet as a document the lawyer can read before the hearing, or print. */
-const Sheet = ({ record }: { record: HearingPrepRecord }) => {
+const Sheet = ({ record, sheetRef, code }: { record: HearingPrepRecord; sheetRef?: RefObject<HTMLElement | null>; code?: string | null }) => {
   const { prep } = record
   const basic = prep.mode === 'basic' || record.model === 'basic'
   return (
-    <article className="print-sheet paper rounded-md p-6">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-ink pb-3">
+    <PrintSheet
+      kind="hearing_prep"
+      title="ورقة تحضير الجلسة"
+      sheetRef={sheetRef}
+      code={code}
+      subtitle={
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-2xl text-ink">ورقة تحضير الجلسة</h3>
           <p className="mt-0.5 text-xs text-ink-soft">
             {prep.hearing_date ? `للجلسة بتاريخ ${formatDate(`${prep.hearing_date}T12:00:00`)} · ` : ''}
             أُعدّت {formatDate(record.created_at)} {formatTime(record.created_at)}
@@ -61,8 +66,10 @@ const Sheet = ({ record }: { record: HearingPrepRecord }) => {
         <Stamp slam="none" tone={basic ? 'green' : 'blue'} className="text-sm">
           {basic ? 'ورقة أساسية — من بيانات الملف' : 'استرشادي — يراجعه المحامي'}
         </Stamp>
-      </header>
-      <section className="mt-4">
+      </div>
+      }
+    >
+      <section>
         <p className="leading-relaxed text-ink">{prep.summary}</p>
         {prep.hearing_focus && (
           <p className="mt-2 border-s-4 border-stamp bg-stamp/5 p-3 text-sm leading-relaxed text-ink">
@@ -83,12 +90,12 @@ const Sheet = ({ record }: { record: HearingPrepRecord }) => {
           </section>
         ))}
       </div>
-      <footer className="mt-6 border-t border-rule pt-3 text-xs leading-relaxed text-ink-faint">
+      <p className="mt-6 text-xs leading-relaxed text-ink-faint">
         {basic
           ? 'رتّب النظام هذه الورقة آلياً من بيانات ملف القضية، دون ذكاء اصطناعي ودون إرسال أي بيانات خارج المكتب. البنود الموسومة «تذكير عام» قائمة تحضير ثابتة. الورقة لا تُعرض على الموكّل.'
           : `أعدّ هذه الورقة مساعد ذكي (${record.model}) من بيانات ملف القضية فقط. البنود الموسومة «غير موثّق» استنتاجات لا تستند إلى الملف. الورقة أداة مساعدة لا تغني عن مراجعة المحامي، ولا تُعرض على الموكّل.`}
-      </footer>
-    </article>
+      </p>
+    </PrintSheet>
   )
 }
 
@@ -103,6 +110,9 @@ export const HearingPrepTab = ({ caseId }: { caseId: string }) => {
   const [hearingDate, setHearingDate] = useState('')
   const [focus, setFocus] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const printing = usePrintWithCode('hearing_prep')
+  // The code printed belongs to one sheet only.
+  const [printedFor, setPrintedFor] = useState<string | null>(null)
   const generate = useMutation({
     mutationFn: async (mode: 'basic' | 'ai') =>
       (
@@ -169,13 +179,10 @@ export const HearingPrepTab = ({ caseId }: { caseId: string }) => {
             ) : (
               <span />
             )}
-            <Button variant="line" size="sm" onClick={() => window.print()}>
-              <Printer className="size-4" aria-hidden="true" />
-              اطبع الورقة
-            </Button>
+            <PrintButton onPrint={() => { setPrintedFor(shown.interaction_id); void printing.print() }} busy={printing.busy} error={printing.error} label="اطبع الورقة" />
           </div>
           <div className={cn(generate.isPending && 'opacity-60')}>
-            <Sheet record={shown} />
+            <Sheet record={shown} sheetRef={printing.sheetRef} code={printedFor === shown.interaction_id ? printing.code : null} />
           </div>
         </>
       ) : (

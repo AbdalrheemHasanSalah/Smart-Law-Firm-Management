@@ -4,7 +4,7 @@ import { AiError } from './aiProvider.js';
 /**
  * The office's monthly allowance of AI requests: AI_MONTHLY_ANALYSES_PER_LAWYER (40 by default)
  * for each lawyer the office pays for (its active admins and lawyers, at least one, as the
- * subscription counts them). Case analyses and AI hearing-preparation sheets count; the free
+ * subscription counts them). Case analyses, AI drafts and AI hearing-preparation sheets count; the free
  * "basic" sheet, which calls no model, does not. Months follow the office's local calendar
  * (REMINDER_TIMEZONE, Palestine by default).
  *
@@ -28,7 +28,10 @@ export async function monthlyUsage(actor) {
          WHERE a.office_id = $1 AND a.created_at >= date_trunc('month', NOW() AT TIME ZONE $2) AT TIME ZONE $2)
      + (SELECT COUNT(*)::int FROM ai_interactions i
          WHERE i.office_id = $1 AND i.question LIKE 'hearing_prep%' AND i.model_name <> 'basic'
-           AND i.created_at >= date_trunc('month', NOW() AT TIME ZONE $2) AT TIME ZONE $2) AS used,
+           AND i.created_at >= date_trunc('month', NOW() AT TIME ZONE $2) AT TIME ZONE $2)
+     + (SELECT COUNT(*)::int FROM case_drafts d
+         WHERE d.office_id = $1 AND d.source = 'ai'
+           AND d.created_at >= date_trunc('month', NOW() AT TIME ZONE $2) AT TIME ZONE $2) AS used,
        GREATEST(1, (SELECT COUNT(*)::int FROM office_memberships m JOIN roles r ON r.role_id = m.role_id
                      WHERE m.office_id = $1 AND m.status = 'active' AND r.role_name IN ('admin', 'lawyer'))) AS lawyers`,
     [actor.office_id, timezone()]

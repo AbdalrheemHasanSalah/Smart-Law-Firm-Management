@@ -32,6 +32,7 @@ import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './h
 import type { Consultation, PageSettings } from './publicPage'
 import { libraryRoutes } from './demoLibrary'
 import { analysisRoutes } from './demoAnalysis'
+import { demoVerification, draftingRoutes } from './demoDrafting'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1295,6 +1296,8 @@ const routes: Route[] = [
   ...(libraryRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
   // case analysis tools (fixed sample results, no model)
   ...(analysisRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // drafting, letterhead and print codes
+  ...(draftingRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
 ]
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {
@@ -1346,6 +1349,8 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
       return { received: true }
     }
   }
+  const verifyPath = /^\/public\/verify\/([^/]+)$/.exec(path)
+  if (verifyPath && method === 'get') return demoVerification(decodeURIComponent(verifyPath[1]!))
   const user = currentUser()
   if (!user) throw fail(401, 'UNAUTHORIZED')
   if (method === 'post' && invitePath) throw fail(403, 'INVITATION_EMAIL_MISMATCH')

@@ -199,6 +199,13 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^اختر: (.+)$/, 'Choose: $1'],
   [/^تُرسل البيانات إلى (.+) بعد حجب الأسماء والأرقام\.$/, 'Data is sent to $1 after names and numbers are redacted.'],
   [/^حُجب قبل الإرسال: (.+)\.$/, (_, parts) => `Redacted before sending: ${parts.split('، ').map(redactedPart).join(', ')}.`],
+  // Drafting.
+  [/^بقيت (\d+) فجوات بين أقواس مربعة لتكملها\.$/, '$1 gaps in square brackets are left to fill.'],
+  [/^نموذج المكتب: (.+)$/, 'Office template: $1'],
+  [/^هيكل جاهز: (.+)$/, (_, title) => `Skeleton: ${translate(title)}`],
+  [/^بعد الاعتماد لا يمكن تعديل النص، ويأخذ المستند بصمة ورمز تحقق يُطبع عليه، ويبقى في ملف القضية\.(.*)$/, (_, rest) =>
+    `Once final, the text can no longer change; the document gets a fingerprint and a verification code printed on it, and stays in the case file.${
+      rest ? ` Note: the text still has ${rest.includes('فجوة واحدة') ? 'one gap' : `${rest.match(/\d+/)?.[0] ?? 'some'} gaps`} in square brackets.` : ''}`],
   // Parts joined with " · " (a citation, a date and a name…): each part on its own.
   [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".

@@ -11,6 +11,8 @@ import type { Client, CurrencySummary, Statement } from '@/lib/types'
 import { InvoicesTable, NewInvoice, useInvoices } from '@/ui/Finance'
 import { Button, cn, Logo, Stamp } from '@/ui/kit'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
+import { PrintButton, PrintSheet, usePrintWithCode } from '@/ui/PrintSheet'
+import { tafqeet } from '@/lib/tafqeet'
 
 /* ───────────────────────── office finances ───────────────────────── */
 
@@ -165,9 +167,105 @@ const SheetTable = ({ head, children }: { head: string[]; children: React.ReactN
   </div>
 )
 
-/** The statement as a printable paper: office letterhead, client, totals per currency, details. */
-const StatementSheet = ({ statement, backTo }: { statement: Statement; backTo?: string }) => {
+/** What a statement says, whichever paper it is printed on. */
+const StatementBody = ({ statement }: { statement: Statement }) => (
+  <>
+    <section className="mt-4 text-sm">
+      <p className="text-xs font-semibold text-ink-soft">الموكّل</p>
+      <p className="text-lg font-semibold text-ink">{statement.client.full_name_or_org}</p>
+      <p className="text-xs text-ink-soft">
+        {[statement.client.national_id && `هوية/تسجيل: ${statement.client.national_id}`, statement.client.phone, statement.client.email].filter(Boolean).join(' · ')}
+      </p>
+    </section>
+
+    {statement.currencies.length === 0 ? (
+      <p className="mt-6 text-sm text-ink-soft">لا مطالبات مالية على هذا الحساب.</p>
+    ) : (
+      <>
+        <section className="mt-6">
+          <h2 className="text-lg text-ink">الملخّص</h2>
+          <SheetTable head={['العملة', 'أتعاب محاماة', 'رسوم محكمة', 'مصاريف', 'المجموع', 'المدفوع', 'الرصيد']}>
+            {statement.currencies.map((entry) => (
+              <tr key={entry.currency} className="border-b border-rule">
+                <td className="font-semibold text-ink">{CURRENCY[entry.currency]}</td>
+                {[entry.legal_fees, entry.court_fees, entry.expenses, entry.billed, entry.paid].map((value, index) => (
+                  <td key={index} className="tabular-nums text-ink">
+                    {formatMoney(value, entry.currency)}
+                  </td>
+                ))}
+                <td className={cn('font-semibold tabular-nums whitespace-nowrap', entry.balance > 0 ? 'text-stamp' : 'text-stamp-green')}>{formatMoney(entry.balance, entry.currency)}</td>
+              </tr>
+            ))}
+          </SheetTable>
+        </section>
+
+        <section className="mt-6">
+          <h2 className="text-lg text-ink">المطالبات</h2>
+          <SheetTable head={['الرقم', 'التاريخ', 'البند', 'القضية', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة']}>
+            {statement.invoices.map((invoice) => (
+              <tr key={invoice.invoice_id} className="border-b border-rule align-top">
+                <td className="whitespace-nowrap text-ink" dir="ltr">
+                  {invoice.invoice_number}
+                </td>
+                <td className="whitespace-nowrap text-ink-soft">{formatDate(invoice.issued_at)}</td>
+                <td className="min-w-32 text-ink">
+                  {INVOICE_CATEGORY[invoice.category]}
+                  {invoice.description && <span className="block text-xs text-ink-soft">{invoice.description}</span>}
+                </td>
+                <td className="text-ink-soft" dir="ltr">
+                  {invoice.case_number ?? '—'}
+                </td>
+                <td className="whitespace-nowrap tabular-nums text-ink">{formatMoney(invoice.amount, invoice.currency)}</td>
+                <td className="whitespace-nowrap tabular-nums text-ink-soft">{formatMoney(invoice.paid_amount, invoice.currency)}</td>
+                <td className="whitespace-nowrap tabular-nums font-semibold text-ink">{formatMoney(invoice.remaining, invoice.currency)}</td>
+                <td className="whitespace-nowrap text-xs">{INVOICE_STATE[invoice.state]?.text}</td>
+              </tr>
+            ))}
+          </SheetTable>
+        </section>
+
+        {statement.payments.length > 0 && (
+          <section className="mt-6">
+            <h2 className="text-lg text-ink">الدفعات المستلمة</h2>
+            <SheetTable head={['التاريخ', 'عن الفاتورة', 'الطريقة', 'المرجع', 'المبلغ']}>
+              {statement.payments.map((payment) => (
+                <tr key={payment.payment_id} className="border-b border-rule">
+                  <td className="whitespace-nowrap text-ink-soft">{formatDate(payment.paid_at)}</td>
+                  <td className="text-ink" dir="ltr">
+                    {payment.invoice_number}
+                  </td>
+                  <td className="text-ink">{PAYMENT_METHOD[payment.method] ?? payment.method}</td>
+                  <td className="text-ink-soft" dir="ltr">
+                    {payment.reference ?? '—'}
+                  </td>
+                  <td className="whitespace-nowrap tabular-nums text-stamp-green">{formatMoney(payment.amount, payment.currency)}</td>
+                </tr>
+              ))}
+            </SheetTable>
+          </section>
+        )}
+      </>
+    )}
+    {statement.currencies.some((entry) => entry.balance > 0) && (
+      <section className="mt-6 space-y-1 text-sm">
+        <h2 className="text-lg text-ink">الرصيد المستحق</h2>
+        {statement.currencies.filter((entry) => entry.balance > 0).map((entry) => (
+          <p key={entry.currency} className="text-ink">
+            <span className="font-semibold tabular-nums">{formatMoney(entry.balance, entry.currency)}</span>
+            {tafqeet(entry.balance, entry.currency) && <span className="text-ink-soft" data-no-translate> — {tafqeet(entry.balance, entry.currency)}</span>}
+          </p>
+        ))}
+      </section>
+    )}
+  </>
+)
+
+const STATEMENT_NOTE = 'كشف صادر من نظام قضيتي. المبالغ بكل عملة منفصلة ولا تُجمع العملات معاً. لأي استفسار تواصل مع المكتب.'
+
+/** The office's statement: on the office letterhead, printed with a verification code. */
+const OfficeStatementSheet = ({ statement, backTo }: { statement: Statement; backTo?: string }) => {
   const settled = statement.currencies.every((entry) => entry.balance <= 0)
+  const printing = usePrintWithCode('statement')
   return (
     <>
       <div className="no-print mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -178,6 +276,32 @@ const StatementSheet = ({ statement, backTo }: { statement: Statement; backTo?: 
         ) : (
           <span />
         )}
+        <PrintButton onPrint={() => void printing.print()} busy={printing.busy} error={printing.error} />
+      </div>
+      <PrintSheet
+        kind="statement"
+        title="كشف حساب"
+        sheetRef={printing.sheetRef}
+        code={printing.code}
+        subtitle={
+          <Stamp slam="none" tone={settled ? 'green' : 'red'} className="mt-1 text-sm">
+            {settled ? 'لا رصيد مستحق' : 'رصيد مستحق'}
+          </Stamp>
+        }
+      >
+        <StatementBody statement={statement} />
+        <p className="mt-6 text-xs text-ink-faint">{STATEMENT_NOTE}</p>
+      </PrintSheet>
+    </>
+  )
+}
+
+/** The client's own statement in the portal, with the office's details from the statement itself. */
+const StatementSheet = ({ statement }: { statement: Statement }) => {
+  const settled = statement.currencies.every((entry) => entry.balance <= 0)
+  return (
+    <>
+      <div className="no-print mb-5 flex justify-end">
         <Button variant="ink" size="sm" onClick={() => window.print()}>
           <Printer className="size-4" aria-hidden="true" />
           اطبع أو احفظ PDF
@@ -202,86 +326,8 @@ const StatementSheet = ({ statement, backTo }: { statement: Statement; backTo?: 
             </div>
           </div>
         </header>
-
-        <section className="mt-4 text-sm">
-          <p className="text-xs font-semibold text-ink-soft">الموكّل</p>
-          <p className="text-lg font-semibold text-ink">{statement.client.full_name_or_org}</p>
-          <p className="text-xs text-ink-soft">
-            {[statement.client.national_id && `هوية/تسجيل: ${statement.client.national_id}`, statement.client.phone, statement.client.email].filter(Boolean).join(' · ')}
-          </p>
-        </section>
-
-        {statement.currencies.length === 0 ? (
-          <p className="mt-6 text-sm text-ink-soft">لا مطالبات مالية على هذا الحساب.</p>
-        ) : (
-          <>
-            <section className="mt-6">
-              <h2 className="text-lg text-ink">الملخّص</h2>
-              <SheetTable head={['العملة', 'أتعاب محاماة', 'رسوم محكمة', 'مصاريف', 'المجموع', 'المدفوع', 'الرصيد']}>
-                {statement.currencies.map((entry) => (
-                  <tr key={entry.currency} className="border-b border-rule">
-                    <td className="font-semibold text-ink">{CURRENCY[entry.currency]}</td>
-                    {[entry.legal_fees, entry.court_fees, entry.expenses, entry.billed, entry.paid].map((value, index) => (
-                      <td key={index} className="tabular-nums text-ink">
-                        {formatMoney(value, entry.currency)}
-                      </td>
-                    ))}
-                    <td className={cn('font-semibold tabular-nums whitespace-nowrap', entry.balance > 0 ? 'text-stamp' : 'text-stamp-green')}>{formatMoney(entry.balance, entry.currency)}</td>
-                  </tr>
-                ))}
-              </SheetTable>
-            </section>
-
-            <section className="mt-6">
-              <h2 className="text-lg text-ink">المطالبات</h2>
-              <SheetTable head={['الرقم', 'التاريخ', 'البند', 'القضية', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة']}>
-                {statement.invoices.map((invoice) => (
-                  <tr key={invoice.invoice_id} className="border-b border-rule align-top">
-                    <td className="whitespace-nowrap text-ink" dir="ltr">
-                      {invoice.invoice_number}
-                    </td>
-                    <td className="whitespace-nowrap text-ink-soft">{formatDate(invoice.issued_at)}</td>
-                    <td className="min-w-32 text-ink">
-                      {INVOICE_CATEGORY[invoice.category]}
-                      {invoice.description && <span className="block text-xs text-ink-soft">{invoice.description}</span>}
-                    </td>
-                    <td className="text-ink-soft" dir="ltr">
-                      {invoice.case_number ?? '—'}
-                    </td>
-                    <td className="whitespace-nowrap tabular-nums text-ink">{formatMoney(invoice.amount, invoice.currency)}</td>
-                    <td className="whitespace-nowrap tabular-nums text-ink-soft">{formatMoney(invoice.paid_amount, invoice.currency)}</td>
-                    <td className="whitespace-nowrap tabular-nums font-semibold text-ink">{formatMoney(invoice.remaining, invoice.currency)}</td>
-                    <td className="whitespace-nowrap text-xs">{INVOICE_STATE[invoice.state]?.text}</td>
-                  </tr>
-                ))}
-              </SheetTable>
-            </section>
-
-            {statement.payments.length > 0 && (
-              <section className="mt-6">
-                <h2 className="text-lg text-ink">الدفعات المستلمة</h2>
-                <SheetTable head={['التاريخ', 'عن الفاتورة', 'الطريقة', 'المرجع', 'المبلغ']}>
-                  {statement.payments.map((payment) => (
-                    <tr key={payment.payment_id} className="border-b border-rule">
-                      <td className="whitespace-nowrap text-ink-soft">{formatDate(payment.paid_at)}</td>
-                      <td className="text-ink" dir="ltr">
-                        {payment.invoice_number}
-                      </td>
-                      <td className="text-ink">{PAYMENT_METHOD[payment.method] ?? payment.method}</td>
-                      <td className="text-ink-soft" dir="ltr">
-                        {payment.reference ?? '—'}
-                      </td>
-                      <td className="whitespace-nowrap tabular-nums text-stamp-green">{formatMoney(payment.amount, payment.currency)}</td>
-                    </tr>
-                  ))}
-                </SheetTable>
-              </section>
-            )}
-          </>
-        )}
-        <footer className="mt-8 border-t border-rule pt-3 text-xs text-ink-faint">
-          كشف صادر من نظام قضيتي. المبالغ بكل عملة منفصلة ولا تُجمع العملات معاً. لأي استفسار تواصل مع المكتب.
-        </footer>
+        <StatementBody statement={statement} />
+        <footer className="mt-8 border-t border-rule pt-3 text-xs text-ink-faint">{STATEMENT_NOTE}</footer>
       </article>
     </>
   )
@@ -296,7 +342,7 @@ export const ClientStatement = () => {
   })
   if (statement.isPending) return <Loading />
   if (statement.isError) return <Failed error={statement.error} />
-  return <StatementSheet statement={statement.data} backTo={`${PATHS.office}/clients`} />
+  return <OfficeStatementSheet statement={statement.data} backTo={`${PATHS.office}/clients`} />
 }
 
 /** The signed-in client's own statement, in the portal. */

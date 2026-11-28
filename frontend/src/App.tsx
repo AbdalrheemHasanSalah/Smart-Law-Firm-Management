@@ -22,6 +22,7 @@ import { SupportInbox } from './pages/Support'
 import { Tools } from './pages/Tools'
 import { LawPage, LegalLibrary, RulingPage } from './pages/LegalLibrary'
 import { LibraryImport } from './pages/LibraryImport'
+import { LetterheadSettings, Templates, VerifyDocument } from './pages/PrintSettings'
 import { Shell } from './ui/Shell'
 import { SupportWidget } from './ui/SupportWidget'
 
@@ -38,6 +39,7 @@ export const App = () => (
     <Routes>
       <Route path={PATHS.home} element={<Landing />} />
       <Route path="/o/:slug" element={<PublicOffice />} />
+      <Route path="/v/:code" element={<VerifyDocument />} />
       <Route path={PATHS.login} element={<GuestOnly><LoginChooser /></GuestOnly>} />
       <Route path="/login/:portal" element={<GuestOnly><Login /></GuestOnly>} />
       <Route path={PATHS.register} element={<Register />} />
@@ -58,6 +60,8 @@ export const App = () => (
       <Route path={`${PATHS.office}/reports`} element={office(<Reports />)} />
       <Route path={`${PATHS.office}/tools`} element={office(<Tools />)} />
       <Route path={`${PATHS.office}/library`} element={office(<LegalLibrary />)} />
+      <Route path={`${PATHS.office}/templates`} element={office(<Templates />)} />
+      <Route path={`${PATHS.office}/letterhead`} element={office(<LetterheadSettings />, ['admin'])} />
       <Route path={`${PATHS.office}/library/laws/:lawId`} element={office(<LawPage />)} />
       <Route path={`${PATHS.office}/library/rulings/:rulingId`} element={office(<RulingPage />)} />
       <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />

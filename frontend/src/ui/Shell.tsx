@@ -24,6 +24,8 @@ import {
   Wallet,
   type LucideIcon,
   BookOpen,
+  FileStack,
+  PenLine,
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState, type ReactNode } from 'react'
@@ -60,6 +62,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
   { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
   { to: `${PATHS.office}/me`, label: 'صفحتي', icon: IdCard },
   { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen },
+  { to: `${PATHS.office}/templates`, label: 'النماذج', icon: FileStack },
   { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
   ...extra,
 ]
@@ -79,6 +82,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
       { to: `${PATHS.office}/finance`, label: 'المالية', icon: Banknote },
       { to: `${PATHS.office}/team`, label: 'الفريق', icon: UsersRound },
       { to: `${PATHS.office}/public-page`, label: 'الصفحة العامة', icon: Globe },
+      { to: `${PATHS.office}/letterhead`, label: 'ترويسة الطباعة', icon: PenLine },
       { to: `${PATHS.office}/activity`, label: 'سجل النشاط', icon: History },
       { to: `${PATHS.office}/subscription`, label: 'الاشتراك', icon: CreditCard },
     ]),

@@ -35,6 +35,7 @@ import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
 import { CaseLibrary } from './LegalLibrary'
 import { CaseAnalysis } from './CaseAnalysis'
+import { CaseDrafting } from './Drafting'
 import { CaseHearings, CaseNotices } from './CaseSessions'
 import { CaseProfit } from './FinanceOffice'
 
@@ -305,6 +306,7 @@ const TABS = [
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
   ['analysis', 'التحليل'],
+  ['drafting', 'الصياغة'],
 ] as const
 type TabKey = (typeof TABS)[number][0]
 
@@ -799,6 +801,7 @@ export const CaseFile = () => {
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
       {tab === 'analysis' && <CaseAnalysis caseId={caseId} />}
+      {tab === 'drafting' && <CaseDrafting caseId={caseId} />}
     </>
   )
 }

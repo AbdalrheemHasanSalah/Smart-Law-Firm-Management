@@ -318,10 +318,44 @@
   }
 }
 
-/* Printing a statement of account: only the sheet itself, on plain paper. */
+/* A draft on screen and on paper: a faint diagonal "مسودة" behind the text. */
+.print-draft {
+  position: relative;
+}
+.print-draft::before {
+  content: 'مسودة';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-doc);
+  font-size: 7rem;
+  font-weight: 700;
+  color: rgb(0 0 0 / 0.06);
+  transform: rotate(-30deg);
+  pointer-events: none;
+}
+
+/* Printing: only the sheet itself, on plain paper, with page numbers and repeated table heads. */
 @media print {
   @page {
-    margin: 14mm;
+    margin: 14mm 14mm 18mm;
+    @bottom-center {
+      content: counter(page) ' / ' counter(pages);
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-size: 9pt;
+      color: #555;
+    }
+  }
+  .print-sheet thead {
+    display: table-header-group;
+  }
+  .print-sheet tr,
+  .print-sheet li {
+    break-inside: avoid;
+  }
+  .print-footer {
+    break-inside: avoid;
   }
   body {
     background: #fff !important;
