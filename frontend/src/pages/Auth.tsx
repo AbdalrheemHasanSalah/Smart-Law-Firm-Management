@@ -286,6 +286,11 @@ export const Login = () => {
               <button type="button" onClick={() => fillDemo(DEMO_ACCOUNTS[portal])} className="block w-full border border-ink/30 px-2 py-1.5 text-start text-xs font-semibold text-ink hover:bg-ink/5">
                 {name}
               </button>
+              {portal === 'staff' && (
+                <button type="button" onClick={() => fillDemo(DEMO_ACCOUNTS.accountant)} className="block w-full border border-ink/30 px-2 py-1.5 text-start text-xs font-semibold text-ink hover:bg-ink/5">
+                  محاسب المكتب
+                </button>
+              )}
               {portal === 'owner' && (
                 <button type="button" onClick={() => fillDemo(DEMO_ACCOUNTS.platform)} className="block w-full border border-ink/30 px-2 py-1.5 text-start text-xs font-semibold text-ink hover:bg-ink/5">
                   مدير المنصّة

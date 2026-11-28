@@ -43,6 +43,17 @@ function redactedPart(part: string) {
 /** Texts built from variables: [Arabic pattern, English]. Checked when no exact entry matches. */
 const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   // Before the general "X من Y" patterns below.
+  [/^الدخول موقوف حتى (.+)$/, 'Sign-in locked until $1'],
+  [/^صلاحيات (.+)$/, (_, name) => `Permissions of ${name}`],
+  [/^(.+) — (مسحوبة من دوره|مضافة له|من دوره)$/, (_, note, kind) => `${translate(note)} — ${kind === 'مسحوبة من دوره' ? 'removed from the role' : kind === 'مضافة له' ? 'added for this member' : 'from the role'}`],
+  [/^القيود المفحوصة: (\d+)( · قيود أقدم من السلسلة لا يمكن فحصها: (\d+))? · (.+)$/, (_, checked, _legacy, legacy, when) => `Entries checked: ${checked}${legacy ? ` · older entries outside the chain that cannot be checked: ${legacy}` : ''} · ${translate(when)}`],
+  [/^آخر قيد: رقم (\d+) · البصمة$/, 'Last entry: no. $1 · fingerprint'],
+  [/^القيد رقم (\d+) \((.+)\): (.+)$/, (_, seq, when, what) => `Entry no. ${seq} (${translate(when)}): ${translate(what)}`],
+  [/^نُزّلت نسخة فُحصت قبل تسليمها — عدد الجداول: (\d+)، وعدد السجلات: (\d+)\. البصمة$/, 'Downloaded a copy that was checked before hand-over — tables: $1, records: $2. Fingerprint'],
+  [/^الملف سليم ومطابق لبصمته: نسخة (.+) بتاريخ (.+)\.$/, (_, office, when) => `The file is intact and matches its fingerprint: the copy of ${office} from ${translate(when)}.`],
+  [/^آخر نسخة سليمة: (.+?)( — مضى عليها أكثر من 36 ساعة، افحص الخادم\.|\.)$/, (_, when, rest) => `Last good backup: ${translate(when)}${rest === '.' ? '.' : ' — more than 36 hours ago, check the server.'}`],
+  [/^(.+) · الجداول: (\d+)$/, '$1 · tables: $2'],
+  [/^(.+) · الملفات: (\d+)$/, '$1 · files: $2'],
   [/^رسالة إلى (.+)$/, (_, name) => `Message to ${name}`],
   [/^حذف (.+) من دليل المكتب؟$/, 'Remove $1 from the office directory?'],
   [/^حذف القالب «(.+)»؟$/, 'Delete the template “$1”?'],

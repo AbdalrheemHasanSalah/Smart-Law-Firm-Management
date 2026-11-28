@@ -1,7 +1,7 @@
 import { pool, query } from '../config/db.js';
 import { hasOfficeContext } from './officeScope.js';
 
-const USER_ROLES = new Set(['admin', 'lawyer', 'assistant', 'client']);
+const USER_ROLES = new Set(['admin', 'lawyer', 'assistant', 'client', 'accountant', 'data_entry', 'print_only']);
 const USER_STATUSES = new Set(['active', 'suspended']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_PAGE_SIZE = 20;
@@ -241,7 +241,7 @@ export async function updateUserRole(actor, userId, body) {
   validateUserId(userId);
   const role = validateBody(body, new Set(['role']));
   if (typeof role !== 'string' || !USER_ROLES.has(role)) {
-    invalid('role must be admin, lawyer, assistant, or client.');
+    invalid('role must be admin, lawyer, assistant, accountant, data_entry, print_only or client.');
   }
   if (actor.user_id?.toLowerCase() === userId.toLowerCase()) {
     throw new UserServiceError(400, 'Administrators cannot change their own role.');

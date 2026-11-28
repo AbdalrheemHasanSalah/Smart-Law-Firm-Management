@@ -36,6 +36,8 @@ import { demoVerification, draftingRoutes } from './demoDrafting'
 import { demoAttachment, portalRoutes } from './demoPortal'
 import { workflowRoutes } from './demoWorkflow'
 import { directoryRoutes } from './demoDirectory'
+import { gate, lockedUntil, permissionsOf, securityRoutes, signInFailed, signInSucceeded } from './demoSecurity'
+import type { Permission } from './permissionRules'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -43,6 +45,7 @@ export const DEMO_ACCOUNTS = {
   staff: 'lawyer@demo.ps',
   client: 'client@demo.ps',
   platform: 'admin@demo.ps',
+  accountant: 'accountant@demo.ps',
 } as const
 
 const OFFICE = 'o-1'
@@ -62,12 +65,16 @@ type DemoUser = {
   role: OfficeRole | null
   is_owner: boolean
   client_id?: string
+  granted?: Permission[]
+  revoked?: Permission[]
 }
 
 const users: DemoUser[] = [
   { user_id: 'u-owner', full_name: 'سامر الخطيب', email: DEMO_ACCOUNTS.owner, status: 'active', is_platform_admin: false, role: 'admin', is_owner: true },
   { user_id: 'u-lawyer', full_name: 'ليان عودة', email: DEMO_ACCOUNTS.staff, status: 'active', is_platform_admin: false, role: 'lawyer', is_owner: false },
   { user_id: 'u-assistant', full_name: 'رنا حمدان', email: 'assistant@demo.ps', status: 'active', is_platform_admin: false, role: 'assistant', is_owner: false },
+  { user_id: 'u-accountant', full_name: 'وسيم البرغوثي', email: DEMO_ACCOUNTS.accountant, status: 'active', is_platform_admin: false, role: 'accountant', is_owner: false },
+  { user_id: 'u-entry', full_name: 'دانة عيسى', email: 'entry@demo.ps', status: 'active', is_platform_admin: false, role: 'data_entry', is_owner: false },
   { user_id: 'u-client', full_name: 'محمود النجار', email: DEMO_ACCOUNTS.client, status: 'active', is_platform_admin: false, role: 'client', is_owner: false, client_id: 'c-1' },
   { user_id: 'u-platform', full_name: 'مدير المنصّة', email: DEMO_ACCOUNTS.platform, status: 'active', is_platform_admin: true, role: null, is_owner: false },
 ]
@@ -440,7 +447,7 @@ const currentUser = () => users.find((user) => user.user_id === sessionStorage.g
 
 const membershipOf = (user: DemoUser): Membership[] =>
   user.role
-    ? [{ office_id: OFFICE, office_name: 'مكتب الخطيب للمحاماة', office_status: 'active', office_city: 'نابلس', role: user.role, membership_status: 'active', is_owner: user.is_owner }]
+    ? [{ office_id: OFFICE, office_name: 'مكتب الخطيب للمحاماة', office_status: 'active', office_city: 'نابلس', role: user.role, membership_status: 'active', is_owner: user.is_owner, permissions: permissionsOf(user) }]
     : []
 
 const sessionOf = (user: DemoUser): Session => {
@@ -1320,6 +1327,13 @@ const routes: Route[] = [
   }) as Route[]),
   // courts, colleagues and message templates
   ...(directoryRoutes({ fail, uid }) as Route[]),
+  // security page, audit chain check, office export and backups
+  ...(securityRoutes({
+    fail,
+    members: () => users,
+    officeName: 'مكتب الخطيب للمحاماة',
+    officeData: () => ({ clients, legal_cases: cases, involves, assigned_to: assignments, tasks, case_notes: notes, documents, contracts, hearings, messages }),
+  }) as Route[]),
   // case stages, fee agreements and the client briefcase
   ...(workflowRoutes({
     fail,
@@ -1344,7 +1358,7 @@ const routes: Route[] = [
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {
   owner: (user) => user.is_owner || user.is_platform_admin || !user.role,
-  staff: (user) => user.role === 'lawyer' || user.role === 'assistant',
+  staff: (user) => user.role !== null && ['lawyer', 'assistant', 'accountant', 'data_entry', 'print_only'].includes(user.role),
   client: (user) => user.role === 'client',
 }
 
@@ -1355,8 +1369,15 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
   const headers = (config.headers?.toJSON?.() ?? {}) as Record<string, unknown>
 
   if (method === 'post' && path === '/auth/sign-in/email') {
-    const user = users.find((entry) => entry.email === String(body.email).trim().toLowerCase())
-    if (!user || body.password !== DEMO_PASSWORD) throw fail(401, 'INVALID_CREDENTIALS')
+    const email = String(body.email).trim().toLowerCase()
+    const until = lockedUntil(email)
+    if (until) throw fail(429, 'ACCOUNT_LOCKED', { locked_until: until })
+    const user = users.find((entry) => entry.email === email)
+    if (!user || body.password !== DEMO_PASSWORD) {
+      signInFailed(email)
+      throw fail(401, 'INVALID_CREDENTIALS')
+    }
+    signInSucceeded(email)
     if (user.status !== 'active') throw fail(403, 'ACCOUNT_INACTIVE')
     const portal = headers['X-Qadiyati-Portal']
     if (typeof portal === 'string' && !PORTAL_ROLES[portal]?.(user)) {
@@ -1393,9 +1414,11 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
   }
   const verifyPath = /^\/public\/verify\/([^/]+)$/.exec(path)
   if (verifyPath && method === 'get') return demoVerification(decodeURIComponent(verifyPath[1]!))
-  const user = currentUser()
-  if (!user) throw fail(401, 'UNAUTHORIZED')
+  const signedIn = currentUser()
+  if (!signedIn) throw fail(401, 'UNAUTHORIZED')
   if (method === 'post' && invitePath) throw fail(403, 'INVITATION_EMAIL_MISMATCH')
+  // The server's permission gate: new roles act as the admin where their permissions allow.
+  const user = gate(signedIn, method, path, fail)
   for (const [routeMethod, pattern, roles, handler] of routes) {
     const match = routeMethod === method ? pattern.exec(path) : null
     if (!match) continue
@@ -1414,7 +1437,14 @@ export const demoAdapter: AxiosAdapter = (config) =>
       try {
         // Serialised, as over a network: the app must never hold references into the demo store,
         // or in-place updates here would change its cache without React noticing.
-        resolve(respond(200, JSON.parse(JSON.stringify(handle(config) ?? null))))
+        const failed = (error: unknown) =>
+          error instanceof Reply
+            ? reject(new AxiosError('Demo request failed', 'ERR_BAD_REQUEST', config, null, respond(error.status, error.body) as never))
+            : reject(new AxiosError(String(error), 'ERR_BAD_RESPONSE', config, null, respond(500, { code: 'SERVER' }) as never))
+        // A few handlers are async (hashing with WebCrypto); the rest answer at once.
+        Promise.resolve(handle(config))
+          .then((result) => resolve(respond(200, JSON.parse(JSON.stringify(result ?? null)))))
+          .catch(failed)
       } catch (error) {
         if (error instanceof Reply) {
           reject(new AxiosError('Demo request failed', 'ERR_BAD_REQUEST', config, null, respond(error.status, error.body) as never))

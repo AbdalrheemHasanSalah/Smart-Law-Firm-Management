@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { STAFF_ROLES } from '@/lib/permissions'
 import { AttachButton, AttachmentView } from './PortalLink'
 import { appendText } from '@/lib/voice'
 import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
@@ -44,7 +45,7 @@ const dayOf = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric',
 const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) => {
   const { session } = useAuth()
   const me = session?.user.user_id
-  const isStaff = session?.role === 'admin' || session?.role === 'lawyer' || session?.role === 'assistant'
+  const isStaff = session?.role != null && STAFF_ROLES.includes(session.role)
   const queryClient = useQueryClient()
   const [text, setText] = useState('')
   const end = useRef<HTMLDivElement>(null)

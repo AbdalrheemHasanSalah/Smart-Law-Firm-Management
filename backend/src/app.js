@@ -10,6 +10,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { createOriginProtection } from './middleware/originProtection.js';
 import { createRateLimit } from './middleware/rateLimit.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
+import { signInLockout } from './services/lockoutService.js';
 import { withRequestedPortal } from './services/portalAccess.js';
 
 const app = express();
@@ -43,6 +44,7 @@ app.use(createOriginProtection({
 app.use('/api/platform/library/import', express.json({ limit: '15mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/auth/sign-in/email', signInLockout);
 app.use('/api/auth/sign-in/email', withRequestedPortal);
 app.all('/api/auth/*', authHandler);
 app.use('/api', apiRoutes);

@@ -47,6 +47,9 @@ export const ROLE: Record<string, string> = {
   lawyer: 'محامٍ',
   assistant: 'مساعد قانوني',
   client: 'موكّل',
+  accountant: 'محاسب',
+  data_entry: 'مُدخل بيانات',
+  print_only: 'طباعة فقط',
 }
 
 const dateFormat = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' })

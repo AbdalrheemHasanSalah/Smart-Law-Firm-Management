@@ -165,3 +165,22 @@ export function passwordResetEmail({ url }) {
     text: `استعادة كلمة المرور / Reset your password (valid for one hour):\n\n${url}`,
   };
 }
+
+/** Sent when five failed sign-ins lock an account for a while. */
+export function accountLockedEmail({ url, minutes }) {
+  const duration = minutes >= 60 ? `${Math.round(minutes / 60)} ساعة` : `${minutes} دقيقة`;
+  const durationEn = minutes >= 60 ? `${Math.round(minutes / 60)} hour(s)` : `${minutes} minutes`;
+  return {
+    subject: 'أُوقف الدخول إلى حسابك مؤقتاً — Sign-in to your Qadiyati account is paused',
+    html: bilingualHtml({
+      arabic: `<p>جرى إدخال كلمة مرور خاطئة لحسابك على قضيتي خمس مرات متتالية، فأوقفنا الدخول إليه مدة ${duration} لحمايته.</p>
+<p>إن كنت أنت من حاول فانتظر قليلاً أو عيّن كلمة مرور جديدة، فذلك يرفع الإيقاف فوراً. وإن لم تكن أنت فننصحك بتعيين كلمة مرور جديدة الآن.</p>`,
+      english: `<p>A wrong password was entered for your Qadiyati account five times in a row, so sign-in is paused for ${durationEn} to protect it.</p>
+<p>If it was you, wait a little or set a new password, which lifts the pause at once. If it was not you, we recommend setting a new password now.</p>`,
+      url,
+      buttonAr: 'تعيين كلمة مرور جديدة',
+      buttonEn: 'Set a new password',
+    }),
+    text: `أُوقف الدخول إلى حسابك مدة ${duration} بعد خمس محاولات خاطئة. لتعيين كلمة مرور جديدة:\nSign-in is paused for ${durationEn} after five wrong passwords. To set a new password:\n\n${url}`,
+  };
+}

@@ -33,7 +33,7 @@ export function portalsFor(rows) {
   if (isPlatformAdmin || memberships.length === 0 || memberships.some((row) => row.is_owner)) {
     allowed.push('owner');
   }
-  if (memberships.some((row) => ['lawyer', 'assistant'].includes(row.role)
+  if (memberships.some((row) => ['lawyer', 'assistant', 'accountant', 'data_entry', 'print_only'].includes(row.role)
     || (row.role === 'admin' && !row.is_owner))) {
     allowed.push('staff');
   }

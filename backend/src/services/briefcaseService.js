@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { can } from '../config/permissions.js';
 import { getClientById } from './clientService.js';
 import { listAgreements } from './feeAgreementService.js';
 import { clientStatement } from './financeService.js';
@@ -88,7 +89,7 @@ export async function clientBriefcase(actor, clientId) {
     : { rows: [] };
 
   let money = null;
-  if (admin) {
+  if (admin && can(actor, 'finance.manage')) {
     const [statement, agreements] = await Promise.all([clientStatement(actor, clientId), listAgreements(actor, { clientId })]);
     money = { currencies: statement.statement?.currencies ?? statement.currencies ?? [], agreements: agreements.agreements };
   }

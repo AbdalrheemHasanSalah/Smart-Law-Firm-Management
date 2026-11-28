@@ -174,7 +174,7 @@ export const EXPECTED_TABLES = [
   'support_messages',
 ];
 
-export const EXPECTED_ROLES = ['admin', 'lawyer', 'assistant', 'client'];
+export const EXPECTED_ROLES = ['admin', 'lawyer', 'assistant', 'client', 'accountant', 'data_entry', 'print_only'];
 
 const RESETTABLE_TABLES = [
   'support_messages',

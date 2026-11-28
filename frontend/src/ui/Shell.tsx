@@ -1,5 +1,7 @@
 import {
   Contact,
+  DatabaseBackup,
+  ShieldCheck,
   Landmark,
   Banknote,
   Receipt,
@@ -35,6 +37,8 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { PATHS, personaOf, useAuth, type Persona } from '@/auth/auth'
 import { DEMO } from '@/lib/api'
 import { formatDay, ROLE } from '@/lib/labels'
+import { actsAsAdminFor, hasPermission, type Permission } from '@/lib/permissions'
+import type { OfficeRole } from '@/lib/types'
 import { SubscriptionBanner, SubscriptionLocked } from '@/pages/Subscriptions'
 import { NotificationBell, useUnreadMessages } from './Inbox'
 import { PreferenceControls } from './Preferences'
@@ -48,25 +52,30 @@ type NavItem = {
   badge?: 'messages'
   /** Also highlighted on pages under this path (for an entry that otherwise matches exactly). */
   within?: string
+  /** Shown only to members who hold it (`adminFor`: who act as the admin for it, as the server decides). */
+  permission?: Permission
+  adminFor?: boolean
+  /** Shown only to these office roles. */
+  roles?: readonly OfficeRole[]
 }
 
 const office = (extra: NavItem[] = []): NavItem[] => [
   { to: PATHS.office, label: 'الرئيسية', icon: LayoutDashboard, end: true },
-  { to: `${PATHS.office}/cases`, label: 'القضايا', icon: Briefcase },
-  { to: `${PATHS.office}/clients`, label: 'الموكّلون', icon: Users },
-  { to: `${PATHS.office}/tasks`, label: 'المهام', icon: ListChecks },
-  { to: `${PATHS.office}/calendar`, label: 'التقويم', icon: CalendarDays },
-  { to: `${PATHS.office}/documents`, label: 'المستندات', icon: FileText },
-  { to: `${PATHS.office}/contracts`, label: 'العقود', icon: FileSignature },
-  { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon },
+  { to: `${PATHS.office}/cases`, label: 'القضايا', icon: Briefcase, permission: 'cases.view' },
+  { to: `${PATHS.office}/clients`, label: 'الموكّلون', icon: Users, permission: 'cases.view' },
+  { to: `${PATHS.office}/tasks`, label: 'المهام', icon: ListChecks, permission: 'cases.view' },
+  { to: `${PATHS.office}/calendar`, label: 'التقويم', icon: CalendarDays, permission: 'cases.view' },
+  { to: `${PATHS.office}/documents`, label: 'المستندات', icon: FileText, permission: 'cases.view' },
+  { to: `${PATHS.office}/contracts`, label: 'العقود', icon: FileSignature, permission: 'cases.view' },
+  { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon, permission: 'cases.view' },
   { to: `${PATHS.office}/messages`, label: 'الرسائل', icon: MessagesSquare, badge: 'messages' },
-  { to: `${PATHS.office}/consultations`, label: 'طلبات الاستشارة', icon: Inbox },
-  { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
+  { to: `${PATHS.office}/consultations`, label: 'طلبات الاستشارة', icon: Inbox, permission: 'clients.edit' },
+  { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn, permission: 'cases.view' },
   { to: `${PATHS.office}/me`, label: 'صفحتي', icon: IdCard },
-  { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen },
-  { to: `${PATHS.office}/templates`, label: 'النماذج', icon: FileStack },
-  { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
-  { to: `${PATHS.office}/directory`, label: 'الدليل المهني', icon: Contact },
+  { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen, permission: 'cases.view' },
+  { to: `${PATHS.office}/templates`, label: 'النماذج', icon: FileStack, permission: 'print' },
+  { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale, permission: 'cases.view' },
+  { to: `${PATHS.office}/directory`, label: 'الدليل المهني', icon: Contact, permission: 'cases.view' },
   ...extra,
 ]
 
@@ -77,6 +86,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
       { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
       { to: `${PATHS.platform}/library`, label: 'المكتبة القانونية', icon: BookOpen },
       { to: `${PATHS.platform}/courts`, label: 'دليل المحاكم', icon: Landmark },
+      { to: `${PATHS.platform}/backups`, label: 'النسخ الاحتياطية', icon: DatabaseBackup },
       { to: `${PATHS.platform}/support`, label: 'رسائل الدعم', icon: Headset },
     ],
     label: 'إدارة المنصّة',
@@ -85,6 +95,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     nav: office([
       { to: `${PATHS.office}/finance`, label: 'المالية', icon: Banknote },
       { to: `${PATHS.office}/team`, label: 'الفريق', icon: UsersRound },
+      { to: `${PATHS.office}/security`, label: 'الأمان والصلاحيات', icon: ShieldCheck },
       { to: `${PATHS.office}/public-page`, label: 'الصفحة العامة', icon: Globe },
       { to: `${PATHS.office}/letterhead`, label: 'ترويسة الطباعة', icon: PenLine },
       { to: `${PATHS.office}/activity`, label: 'سجل النشاط', icon: History },
@@ -92,7 +103,13 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     ]),
     label: 'صاحب المكتب',
   },
-  lawyer: { nav: office([{ to: `${PATHS.office}/custody`, label: 'عُهدتي', icon: Wallet }]), label: 'فريق المكتب' },
+  lawyer: {
+    nav: office([
+      { to: `${PATHS.office}/custody`, label: 'عُهدتي', icon: Wallet, roles: ['lawyer', 'assistant'] },
+      { to: `${PATHS.office}/finance`, label: 'المالية', icon: Banknote, permission: 'finance.manage', adminFor: true },
+    ]),
+    label: 'فريق المكتب',
+  },
   client: {
     nav: [
       { to: PATHS.client, label: 'قضاياي', icon: Briefcase, end: true },
@@ -120,7 +137,12 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   const navigate = useNavigate()
   const location = useLocation()
   const persona = personaOf(session) ?? 'lawyer'
-  const { nav, label } = PERSONA[persona]
+  const { nav: personaNav, label } = PERSONA[persona]
+  const nav = personaNav.filter(
+    (item) =>
+      (!item.roles || (session?.role != null && item.roles.includes(session.role))) &&
+      (!item.permission || (item.adminFor ? actsAsAdminFor : hasPermission)(session, item.permission)),
+  )
   const roleName = persona === 'platform' ? 'مدير المنصّة' : persona === 'owner' ? 'صاحب المكتب' : ROLE[session?.role ?? 'lawyer']
   const signOut = () => void logout().then(() => navigate(PATHS.login))
   // Every side-bar entry leads to the main page of its section. Clicking the section you are

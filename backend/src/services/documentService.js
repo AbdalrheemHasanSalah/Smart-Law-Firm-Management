@@ -6,6 +6,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { query } from '../config/db.js';
+import { NEW_ROLES } from '../config/permissions.js';
 import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,6 +64,8 @@ function assertActor(actor, roles) {
 
 function documentAccessScope(actor, parameters, alias = 'd') {
   const office = `AND ${officeCondition(actor, parameters, alias)}`;
+  // The accountant, data entry and print-only roles read as the admin but never restricted files.
+  if (actor.role === 'admin' && NEW_ROLES.has(actor.office_role)) return `${office} AND ${alias}.access_level <> 'restricted'`;
   if (actor.role === 'admin') return office;
 
   parameters.push(actor.user_id);

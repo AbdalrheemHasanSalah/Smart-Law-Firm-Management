@@ -23,6 +23,7 @@ import {
   type FeeAgreement,
   type Stage,
 } from '@/lib/workflow'
+import { useAdminFor } from '@/lib/permissions'
 import { FormActions, Modal, SelectField, TextArea } from '@/ui/forms'
 import { Button, cn, Field } from '@/ui/kit'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
@@ -38,7 +39,9 @@ export const StageBar = ({ caseId }: { caseId: string }) => {
   const change = useChangeStage(caseId)
   const mizan = useSetMizan(caseId)
   const role = useRole()
-  const canMove = role === 'admin' || role === 'lawyer'
+  // The admin and lawyers move stages; so does anyone acting as the admin for case editing (data entry).
+  const editsAsAdmin = useAdminFor('cases.edit')
+  const canMove = role === 'admin' || role === 'lawyer' || editsAsAdmin
   const [moving, setMoving] = useState<Stage | null>(null)
   const [note, setNote] = useState('')
   const [showHistory, setShowHistory] = useState(false)
@@ -363,7 +366,7 @@ const SettleDialog = ({ agreement, onClose }: { agreement: FeeAgreement | null; 
 
 /** The case's fee agreements, for the office admin, in the case's finance tab. */
 export const CaseFeeAgreements = ({ caseId }: { caseId: string }) => {
-  const admin = useRole() === 'admin'
+  const admin = useAdminFor('finance.manage')
   const agreements = useAgreements({ caseId }, admin)
   const [creating, setCreating] = useState(false)
   const [settling, setSettling] = useState<FeeAgreement | null>(null)

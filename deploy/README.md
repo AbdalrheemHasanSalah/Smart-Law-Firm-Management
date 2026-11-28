@@ -208,14 +208,22 @@ sudo systemctl restart qadiyati-api
   ```
   (أعطِ مستخدمك صلاحية القراءة أولاً: `sudo chmod 755 /var/backups/qadiyati && sudo chmod 644 /var/backups/qadiyati/*`)
 
-**الاسترجاع** (يستبدل البيانات الحالية):
+- **التحقق:** كل نسخة تُفحص فور أخذها: يجب أن تُقرأ قائمة محتويات قاعدة البيانات (`pg_restore --list`) وأن يُفتح أرشيف المستندات. نتيجة كل ليلة (الحجم، وبصمة SHA-256، ونجاح الفحص) تُكتب في `/var/lib/qadiyati/backup-status.json`، وتظهر لمدير المنصّة في صفحة **النسخ الاحتياطية**. إن مرّ أكثر من 36 ساعة دون نسخة سليمة تظهر الصفحة تحذيراً.
+- **نسخة المكتب الواحد:** صاحب كل مكتب يستطيع من صفحة **الأمان والصلاحيات** تنزيل ملف JSON ببيانات مكتبه وحده، معه بصمة SHA-256 يتحقق منها في الصفحة نفسها. (الملفات المرفوعة نفسها لا تدخل فيه، بل سجلاتها فقط.)
+
+**الاسترجاع** (يستبدل البيانات الحالية، مع طريق للرجوع):
 ```bash
-sudo systemctl stop qadiyati-api
-sudo -u postgres pg_restore --clean --if-exists --no-owner --role=qadiyati -d qadiyati /var/backups/qadiyati/db_التاريخ.dump
-sudo tar -xzf /var/backups/qadiyati/documents_التاريخ.tar.gz -C /opt/qadiyati/backend
-sudo chown -R qadiyati:qadiyati /opt/qadiyati/backend/private-documents /opt/qadiyati/backend/uploads
-sudo systemctl start qadiyati-api
+ls /var/backups/qadiyati                    # اختر التاريخ، مثل 2026-11-28_0300
+sudo qadiyati-restore 2026-11-28_0300       # قاعدة البيانات والمستندات
+sudo qadiyati-restore 2026-11-28_0300 --db-only   # قاعدة البيانات وحدها
 ```
+ما يفعله السكربت بالترتيب، ويتوقف عند أول خطأ:
+1. يطابق بصمة النسخة مع المسجّلة ليلة أخذها، ويتأكد أنها سليمة.
+2. يأخذ **لقطة من الوضع الحالي** (`pre-restore_الوقت.dump` و`.tar.gz`).
+3. يوقف الخادم ويسترجع قاعدة البيانات **في معاملة واحدة** (إن فشلت لا يتغيّر شيء)، ثم المستندات مع الإبقاء على القديمة جانباً.
+4. يشغّل الخادم ويفحص `/api/health`؛ إن لم يستجب يعيد اللقطة تلقائياً.
+
+**للتراجع عن استرجاع تمّ:** `sudo qadiyati-restore pre-restore_الوقت` (اللقطات تبقى 30 يوماً، ويطبع السكربت الأمر الدقيق في آخره).
 
 ## 10. (اختياري) نقل بياناتك المحلية
 

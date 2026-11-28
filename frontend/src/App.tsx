@@ -25,13 +25,14 @@ import { LibraryImport } from './pages/LibraryImport'
 import { LetterheadSettings, Templates, VerifyDocument } from './pages/PrintSettings'
 import { ClientBriefcase } from './pages/Workflow'
 import { Directory, PlatformCourts } from './pages/Directory'
+import { PlatformBackups, SecurityPage } from './pages/Security'
 import { Shell } from './ui/Shell'
+import { STAFF_ROLES, type Permission } from './lib/permissions'
+import type { OfficeRole } from './lib/types'
 import { SupportWidget } from './ui/SupportWidget'
 
-const STAFF = ['admin', 'lawyer', 'assistant'] as const
-
-const office = (page: ReactNode, roles: readonly ('admin' | 'lawyer' | 'assistant')[] = STAFF) => (
-  <Require roles={roles}>
+const office = (page: ReactNode, roles: readonly OfficeRole[] = STAFF_ROLES, permission?: Permission) => (
+  <Require roles={roles} permission={permission}>
     <Shell>{page}</Shell>
   </Require>
 )
@@ -50,7 +51,7 @@ export const App = () => (
       <Route path="/invite/:token" element={<Invitation />} />
       <Route path={PATHS.onboarding} element={<Require><Onboarding /></Require>} />
 
-      <Route path={PATHS.office} element={<Require roles={STAFF}><Shell plain><Today /></Shell></Require>} />
+      <Route path={PATHS.office} element={<Require roles={STAFF_ROLES}><Shell plain><Today /></Shell></Require>} />
       <Route path={`${PATHS.office}/cases`} element={office(<Cases />)} />
       <Route path={`${PATHS.office}/cases/:caseId`} element={office(<CaseFile />)} />
       <Route path={`${PATHS.office}/clients`} element={office(<Clients />)} />
@@ -64,25 +65,27 @@ export const App = () => (
       <Route path={`${PATHS.office}/directory`} element={office(<Directory />)} />
       <Route path={`${PATHS.office}/library`} element={office(<LegalLibrary />)} />
       <Route path={`${PATHS.office}/templates`} element={office(<Templates />)} />
-      <Route path={`${PATHS.office}/letterhead`} element={office(<LetterheadSettings />, ['admin'])} />
+      <Route path={`${PATHS.office}/letterhead`} element={office(<LetterheadSettings />, ['admin'], 'office.manage')} />
       <Route path={`${PATHS.office}/library/laws/:lawId`} element={office(<LawPage />)} />
       <Route path={`${PATHS.office}/library/rulings/:rulingId`} element={office(<RulingPage />)} />
-      <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />
+      <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'], 'office.manage')} />
       <Route path={`${PATHS.office}/calendar`} element={office(<Calendar />)} />
-      <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'])} />
+      <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'], 'finance.manage')} />
       <Route path={`${PATHS.office}/clients/:clientId/briefcase`} element={office(<ClientBriefcase />)} />
-      <Route path={`${PATHS.office}/clients/:clientId/statement`} element={office(<ClientStatement />, ['admin'])} />
+      <Route path={`${PATHS.office}/clients/:clientId/statement`} element={office(<ClientStatement />, ['admin'], 'finance.manage')} />
       <Route path={`${PATHS.client}/statement`} element={<Require roles={['client']}><Shell><PortalStatement /></Shell></Require>} />
-      <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'])} />
+      <Route path={`${PATHS.office}/security`} element={office(<SecurityPage />, ['admin'], 'office.manage')} />
+      <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'], 'office.manage')} />
       <Route path={`${PATHS.office}/me`} element={office(<MyHr />)} />
       <Route path={`${PATHS.office}/consultations`} element={office(<Consultations />)} />
-      <Route path={`${PATHS.office}/public-page`} element={office(<PublicPageSettings />, ['admin'])} />
+      <Route path={`${PATHS.office}/public-page`} element={office(<PublicPageSettings />, ['admin'], 'office.manage')} />
 
       <Route path={`${PATHS.office}/messages`} element={office(<Messages />)} />
       <Route path={`${PATHS.client}/messages`} element={<Require roles={['client']}><Shell><Messages /></Shell></Require>} />
       <Route path={PATHS.client} element={<Require roles={['client']}><Shell><Portal /></Shell></Require>} />
-      <Route path={`${PATHS.office}/subscription`} element={office(<OfficeSubscription />, ['admin'])} />
+      <Route path={`${PATHS.office}/subscription`} element={office(<OfficeSubscription />, ['admin'], 'office.manage')} />
       <Route path={`${PATHS.platform}/support`} element={<Require platform><Shell><SupportInbox /></Shell></Require>} />
+      <Route path={`${PATHS.platform}/backups`} element={<Require platform><Shell><PlatformBackups /></Shell></Require>} />
       <Route path={`${PATHS.platform}/courts`} element={<Require platform><Shell><PlatformCourts /></Shell></Require>} />
       <Route path={`${PATHS.platform}/library`} element={<Require platform><Shell><LibraryImport /></Shell></Require>} />
       <Route path={`${PATHS.platform}/subscriptions`} element={<Require platform><Shell><PlatformSubscriptions /></Shell></Require>} />

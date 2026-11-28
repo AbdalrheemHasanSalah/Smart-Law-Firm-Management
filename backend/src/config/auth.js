@@ -6,6 +6,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 
 import { pool } from './db.js';
 import { getSecurityConfig } from './security.js';
+import { clearLockout } from '../services/lockoutService.js';
 import { passwordResetEmail, sendMail } from '../services/mailService.js';
 import { portalContext, portalsFor } from '../services/portalAccess.js';
 
@@ -302,6 +303,16 @@ export const auth = isUnitTest
     },
   },
   databaseHooks: {
+    // A new password (reset or change) lifts a sign-in lock on the account's address.
+    account: {
+      update: {
+        after: async (account) => {
+          if (account?.providerId !== 'credential' || !account.userId) return;
+          const owner = await pool.query('SELECT lower(email) AS email FROM auth_users WHERE id = $1', [account.userId]);
+          if (owner.rows[0]?.email) await clearLockout(owner.rows[0].email);
+        },
+      },
+    },
     user: {
       update: {
         after: async (user) => {

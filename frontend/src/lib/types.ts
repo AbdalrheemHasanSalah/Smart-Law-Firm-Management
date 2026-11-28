@@ -1,6 +1,6 @@
 /** Shapes returned by the backend (snake_case, exactly as the API sends them). */
 
-export type OfficeRole = 'admin' | 'lawyer' | 'assistant' | 'client'
+export type OfficeRole = 'admin' | 'lawyer' | 'assistant' | 'client' | 'accountant' | 'data_entry' | 'print_only'
 export type OfficeStatus = 'pending' | 'active' | 'rejected' | 'suspended'
 export type Portal = 'owner' | 'staff' | 'client'
 
@@ -12,6 +12,8 @@ export type Membership = {
   role: OfficeRole
   membership_status: 'active' | 'suspended'
   is_owner: boolean
+  /** Staff only: what the member may do in this office. */
+  permissions?: string[]
 }
 
 export type Session = {

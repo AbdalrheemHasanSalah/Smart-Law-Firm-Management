@@ -120,3 +120,53 @@ export async function listAuditLog(actor, queryParameters = {}) {
     pagination: { page, pageSize, total: count, totalPages: Math.ceil(count / pageSize) },
   };
 }
+
+/**
+ * Checks the office's hash chain (migration 0023). Each entry must follow the one before it with
+ * no gap, point to its hash, and still hash to the value it was written with. Reports the first
+ * problems found and the chain head, which the owner can note down to compare with later.
+ * Entries written before the chain existed are counted but cannot be checked.
+ */
+export async function verifyAuditChain(actor) {
+  if (!actor || actor.role !== 'admin' || !UUID_PATTERN.test(String(actor.user_id)) || !UUID_PATTERN.test(String(actor.office_id))) {
+    throw new AuditServiceError(403, 'You do not have permission to access this resource.');
+  }
+  const result = await query(
+    `WITH chain AS (
+       SELECT chain_seq, created_at, prev_hash, entry_hash,
+              prev_hash = COALESCE(lag(entry_hash) OVER w, repeat('0', 64)) AS link_ok,
+              chain_seq = COALESCE(lag(chain_seq) OVER w, 0) + 1 AS seq_ok,
+              entry_hash = audit_entry_hash(prev_hash, chain_seq, office_id, user_id, action, entity_type,
+                                            entity_id, details, ip_address, created_at) AS hash_ok
+         FROM audit_logs
+        WHERE office_id = $1 AND chain_seq IS NOT NULL
+       WINDOW w AS (ORDER BY chain_seq)
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM chain) AS checked,
+       (SELECT COUNT(*)::int FROM audit_logs WHERE office_id = $1 AND chain_seq IS NULL) AS legacy,
+       (SELECT json_build_object('seq', chain_seq, 'hash', entry_hash, 'at', created_at)
+          FROM chain ORDER BY chain_seq DESC LIMIT 1) AS head,
+       (SELECT COALESCE(json_agg(problem ORDER BY (problem->>'seq')::bigint), '[]'::json) FROM (
+          SELECT json_build_object(
+                   'seq', chain_seq,
+                   'at', created_at,
+                   'kind', CASE WHEN NOT hash_ok THEN 'modified' WHEN NOT seq_ok THEN 'missing_before' ELSE 'broken_link' END
+                 ) AS problem
+            FROM chain
+           WHERE NOT (link_ok AND seq_ok AND hash_ok)
+           ORDER BY chain_seq
+           LIMIT 20
+        ) problems) AS problems`,
+    [actor.office_id]
+  );
+  const row = result.rows[0];
+  return {
+    ok: row.problems.length === 0,
+    checked: row.checked,
+    legacy: row.legacy,
+    head: row.head,
+    problems: row.problems,
+    checked_at: new Date().toISOString(),
+  };
+}
