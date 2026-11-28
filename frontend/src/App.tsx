@@ -20,6 +20,8 @@ import { Calendar } from './pages/Calendar'
 import { ClientStatement, OfficeFinance, PortalStatement } from './pages/Finance'
 import { SupportInbox } from './pages/Support'
 import { Tools } from './pages/Tools'
+import { LawPage, LegalLibrary, RulingPage } from './pages/LegalLibrary'
+import { LibraryImport } from './pages/LibraryImport'
 import { Shell } from './ui/Shell'
 import { SupportWidget } from './ui/SupportWidget'
 
@@ -55,6 +57,9 @@ export const App = () => (
       <Route path={`${PATHS.office}/custody`} element={office(<MyCustody />)} />
       <Route path={`${PATHS.office}/reports`} element={office(<Reports />)} />
       <Route path={`${PATHS.office}/tools`} element={office(<Tools />)} />
+      <Route path={`${PATHS.office}/library`} element={office(<LegalLibrary />)} />
+      <Route path={`${PATHS.office}/library/laws/:lawId`} element={office(<LawPage />)} />
+      <Route path={`${PATHS.office}/library/rulings/:rulingId`} element={office(<RulingPage />)} />
       <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />
       <Route path={`${PATHS.office}/calendar`} element={office(<Calendar />)} />
       <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'])} />
@@ -70,6 +75,7 @@ export const App = () => (
       <Route path={PATHS.client} element={<Require roles={['client']}><Shell><Portal /></Shell></Require>} />
       <Route path={`${PATHS.office}/subscription`} element={office(<OfficeSubscription />, ['admin'])} />
       <Route path={`${PATHS.platform}/support`} element={<Require platform><Shell><SupportInbox /></Shell></Require>} />
+      <Route path={`${PATHS.platform}/library`} element={<Require platform><Shell><LibraryImport /></Shell></Require>} />
       <Route path={`${PATHS.platform}/subscriptions`} element={<Require platform><Shell><PlatformSubscriptions /></Shell></Require>} />
       <Route path={`${PATHS.platform}/offices/:officeId`} element={<Require platform><Shell><OfficeRequest /></Shell></Require>} />
       <Route path={PATHS.platform} element={<Require platform><Shell><Platform /></Shell></Require>} />

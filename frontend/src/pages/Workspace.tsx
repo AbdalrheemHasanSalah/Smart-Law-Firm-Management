@@ -33,6 +33,7 @@ import { HearingPrepTab } from '@/ui/HearingPrep'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
+import { CaseLibrary } from './LegalLibrary'
 import { CaseHearings, CaseNotices } from './CaseSessions'
 import { CaseProfit } from './FinanceOffice'
 
@@ -298,6 +299,7 @@ const TABS = [
   ['notes', 'الملاحظات'],
   ['documents', 'المستندات'],
   ['powers', 'التوكيلات'],
+  ['library', 'المراجع القانونية'],
   ['tasks', 'المهام'],
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
@@ -790,6 +792,7 @@ export const CaseFile = () => {
       {tab === 'notes' && <Notes caseId={caseId} />}
       {tab === 'documents' && <CaseDocuments caseId={caseId} />}
       {tab === 'powers' && <CasePowers caseId={caseId} />}
+      {tab === 'library' && <CaseLibrary caseId={caseId} />}
       {tab === 'tasks' && (caseTasks.length === 0 ? <Empty>لا مهام مرتبطة بهذه القضية.</Empty> : <TasksTable rows={caseTasks} />)}
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}

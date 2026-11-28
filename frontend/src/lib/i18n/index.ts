@@ -155,6 +155,24 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^(\d{1,2}) (كانون الثاني|شباط|آذار|نيسان|أيار|حزيران|تموز|آب|أيلول|تشرين الأول|تشرين الثاني|كانون الأول) (\d{4})$/, (_, day, month, year) => `${day} ${MONTHS[month]} ${year}`],
   [/^(.+) — (.+)$/, (_, a, b) => `${translate(a)} — ${translate(b)}`],
   [/^(.+)، (.+)$/, (_, a, b) => `${translate(a)}, ${translate(b)}`],
+  // Legal library: citations, counts and article titles built from their parts.
+  [/^(?:(قانون|قرار بقانون|نظام|مرسوم|قرار|أمر|تشريع) )?رقم (\S+)(?: لسنة (\d{4}))?$/, (_, kind, number, year) =>
+    [kind ? translate(kind) : null, `No. ${number}`, year ? `of ${year}` : null].filter(Boolean).join(' ')],
+  [/^(?:(قانون|قرار بقانون|نظام|مرسوم|قرار|أمر|تشريع) )?لسنة (\d{4})$/, (_, kind, year) => [kind ? translate(kind) : null, `of ${year}`].filter(Boolean).join(' ')],
+  [/^المادة (\S+) من$/, 'Article $1 of'],
+  [/^المادة (\S+)$/, 'Article $1'],
+  [/^العدد (\d+)$/, 'Issue $1'],
+  [/^(\d+) (?:مادة|مواد)$/, (_, a) => `${a} article${n(a)}`],
+  [/^مادة واحدة$/, '1 article'],
+  [/^مادتان$/, '2 articles'],
+  [/^أُخفيت مادتان ملغاتان تطابقان البحث\.$/, 'Two repealed articles matching the search were hidden.'],
+  [/^(\d+) (?:بنود|بنداً)$/, (_, a) => `${a} item${n(a)}`],
+  [/^بند واحد$/, '1 item'],
+  [/^بندان$/, '2 items'],
+  [/^أُخفيت (\d+) (?:مواد|مادة) ملغاة تطابق البحث\.$/, '$1 repealed articles matching the search were hidden.'],
+  [/^· (\d+) مادة مخزّنة ليست في الملف بقيت كما هي$/, (_, a) => `· ${a} stored article${n(a)} not in the file kept as they are`],
+  // Parts joined with " · " (a citation, a date and a name…): each part on its own.
+  [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".
   [/^([^:]+): (.+)$/, (_, a, b) => `${a}: ${translate(b)}`],
 ]

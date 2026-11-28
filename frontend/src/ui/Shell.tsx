@@ -23,6 +23,7 @@ import {
   UsersRound,
   Wallet,
   type LucideIcon,
+  BookOpen,
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState, type ReactNode } from 'react'
@@ -58,6 +59,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
   { to: `${PATHS.office}/consultations`, label: 'طلبات الاستشارة', icon: Inbox },
   { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
   { to: `${PATHS.office}/me`, label: 'صفحتي', icon: IdCard },
+  { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen },
   { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
   ...extra,
 ]
@@ -67,6 +69,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     nav: [
       { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/` },
       { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
+      { to: `${PATHS.platform}/library`, label: 'المكتبة القانونية', icon: BookOpen },
       { to: `${PATHS.platform}/support`, label: 'رسائل الدعم', icon: Headset },
     ],
     label: 'إدارة المنصّة',

@@ -30,6 +30,7 @@ import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
 import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseCategory, FinanceAccount, LedgerEntry } from './officeFinance'
 import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './hr'
 import type { Consultation, PageSettings } from './publicPage'
+import { libraryRoutes } from './demoLibrary'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1289,6 +1290,8 @@ const routes: Route[] = [
     notifications.push({ notification_id: uid('nt'), user_id: contact.user_id, title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${user.full_name}.`, notification_type: 'message', read_at: null, created_at: message.sent_at })
     return { message }
   }],
+  // legal library (fictional sample texts)
+  ...(libraryRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
 ]
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {

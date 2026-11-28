@@ -39,6 +39,8 @@ app.use(createOriginProtection({
   enforce: securityConfig.enforceOriginProtection,
   trustedOrigins: securityConfig.trustedOrigins,
 }));
+// A legal-library import file is far larger than any other request; only that route allows it.
+app.use('/api/platform/library/import', express.json({ limit: '15mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth/sign-in/email', withRequestedPortal);
