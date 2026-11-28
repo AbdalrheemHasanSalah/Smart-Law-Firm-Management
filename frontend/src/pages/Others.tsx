@@ -8,6 +8,7 @@ import { daysUntil, documentDownloadUrl, useMyHearings, useSharedDocuments, type
 import { CASE_STATUS, CASE_TYPE, formatDate, formatDay, formatTime } from '@/lib/labels'
 import type { CaseNote, DocumentRecord, LegalCase } from '@/lib/types'
 import { cn, Stamp } from '@/ui/kit'
+import { ClientStage } from './Workflow'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
 import { MyPowers } from './PowersOfAttorney'
 
@@ -133,6 +134,7 @@ export const Portal = () => {
                     {CASE_TYPE[row.case_type] ?? row.case_type} · فُتحت {formatDate(row.opened_at)}
                   </p>
                   {row.description && <p className="mt-3 leading-relaxed text-ink-soft">{row.description}</p>}
+                  <ClientStage caseId={row.case_id} />
                   {nextHearing(row.case_id) && (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-stamp/8 px-2.5 py-1 text-sm text-ink">
                       <CalendarClock className="size-4 text-stamp" aria-hidden="true" />

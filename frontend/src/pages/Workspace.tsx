@@ -41,6 +41,7 @@ import { CaseAnalysis } from './CaseAnalysis'
 import { CaseDrafting } from './Drafting'
 import { CaseHearings, CaseNotices } from './CaseSessions'
 import { CaseProfit } from './FinanceOffice'
+import { CaseFeeAgreements, StageBar } from './Workflow'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -730,6 +731,7 @@ const CaseFinance = ({ caseId }: { caseId: string }) => {
         {owner && <AddButton onClick={() => setBilling(true)}>مطالبة جديدة</AddButton>}
       </div>
       {owner && <CaseProfit caseId={caseId} />}
+      <CaseFeeAgreements caseId={caseId} />
       {invoices.isPending ? (
         <Loading />
       ) : invoices.isError ? (
@@ -793,6 +795,7 @@ export const CaseFile = () => {
         </div>
       </div>
       {update.isError && <p role="alert" className="mb-4 text-sm text-stamp">{messageOf(update.error)}</p>}
+      <StageBar caseId={caseId} />
 
       <div role="tablist" aria-label="أقسام القضية" className="mb-6 flex flex-wrap gap-1 border-b border-rule">
         {TABS.map(([key, label]) => (
@@ -1152,6 +1155,9 @@ export const Clients = () => {
                     </Link>
                   </>
                 )}
+                <Link to={`/office/clients/${client.client_id}/briefcase`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
+                  الحقيبة
+                </Link>
                 <Link to={`/office/powers-of-attorney?client=${client.client_id}`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
                   التوكيلات
                 </Link>

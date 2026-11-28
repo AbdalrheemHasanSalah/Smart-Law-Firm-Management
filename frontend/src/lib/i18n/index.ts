@@ -43,6 +43,10 @@ function redactedPart(part: string) {
 /** Texts built from variables: [Arabic pattern, English]. Checked when no exact entry matches. */
 const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   // Before the general "X من Y" patterns below.
+  [/^قسط (\d+) من (\d+) — (.+)$/, 'Installment $1 of $2 — $3'],
+  [/^(انقل القضية|نقل القضية) إلى مرحلة (.+)$/, (_, verb, stage) => `${verb === 'انقل القضية' ? 'Move' : 'Moving'} the case to the ${translate(stage)} stage`],
+  [/^(\d+) أقساط متأخرة$/, '$1 overdue installments'],
+  [/^(.+) ←$/, '$1 →'],
   [/^استُعمل هذا الشهر (\d+) من (\d+)$/, 'Used this month: $1 of $2'],
   [/^(\d+) طلبات جديدة بانتظار قرارك$/, '$1 new requests awaiting your decision'],
   [/^طلب جديد واحد بانتظار قرارك$/, 'One new request awaiting your decision'],

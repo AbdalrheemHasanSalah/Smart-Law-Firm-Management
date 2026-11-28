@@ -33,6 +33,10 @@ export const demoAttachment = (fileId: unknown) => {
   return file ? { file_id: file.file_id, file_name: file.file_name, mime_type: file.mime_type, size_bytes: file.size_bytes, status: file.status } : null
 }
 
+/** What one client sent and was sent, for the demo briefcase. */
+export const demoClientFiles = (clientId: string) => files.filter((entry) => entry.client_id === clientId)
+export const demoClientNotices = (clientId: string) => notices.filter((entry) => entry.client_id === clientId)
+
 export const portalRoutes = ({ fail, uid, caseFor, clientsOfCase }: Helpers): PortalRoute[] => {
   const STAFF = ['admin', 'lawyer', 'assistant'] as const
   const ALL = ['admin', 'lawyer', 'assistant', 'client'] as const

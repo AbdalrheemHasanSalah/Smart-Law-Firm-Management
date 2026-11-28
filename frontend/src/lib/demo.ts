@@ -34,6 +34,7 @@ import { libraryRoutes } from './demoLibrary'
 import { analysisRoutes } from './demoAnalysis'
 import { demoVerification, draftingRoutes } from './demoDrafting'
 import { demoAttachment, portalRoutes } from './demoPortal'
+import { workflowRoutes } from './demoWorkflow'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1315,6 +1316,26 @@ const routes: Route[] = [
           full_name_or_org: clients.find((client) => client.client_id === link.client_id)?.full_name_or_org ?? '',
           user_id: users.find((user) => user.client_id === link.client_id)?.user_id ?? null,
         })),
+  }) as Route[]),
+  // case stages, fee agreements and the client briefcase
+  ...(workflowRoutes({
+    fail,
+    uid,
+    caseFor: caseFor as never,
+    visibleCases: visibleCases as never,
+    clientsOfCase: (caseId) =>
+      involves
+        .filter((link) => link.case_id === caseId)
+        .map((link) => ({ client_id: link.client_id, full_name_or_org: clients.find((client) => client.client_id === link.client_id)?.full_name_or_org ?? '' })),
+    clientById: (clientId) => clients.find((client) => client.client_id === clientId),
+    casesOfClient: (clientId) => involves.filter((link) => link.client_id === clientId).map((link) => link.case_id),
+    clientUserId: (clientId) => users.find((user) => user.client_id === clientId)?.user_id ?? null,
+    thread: (userId, otherId) =>
+      messages.filter((message) => (message.sender_user_id === userId && message.receiver_user_id === otherId) || (message.sender_user_id === otherId && message.receiver_user_id === userId)),
+    documentsOfClient: (clientId, caseIds) =>
+      documents.filter((document) => document.client_id === clientId && caseIds.includes(document.case_id)).map(({ document_id, file_name, document_type, created_at, case_id }) => ({ document_id, file_name, document_type: document_type ?? '', created_at, case_id })),
+    nextHearing: (caseId) =>
+      hearings.filter((entry) => entry.case_id === caseId && entry.status === 'scheduled' && entry.hearing_at > new Date().toISOString()).map((entry) => entry.hearing_at).sort()[0] ?? null,
   }) as Route[]),
 ]
 

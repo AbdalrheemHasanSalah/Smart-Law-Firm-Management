@@ -237,6 +237,11 @@ CREATE TABLE IF NOT EXISTS legal_cases (
     description TEXT,
     court_id UUID REFERENCES courts(court_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    -- Where the case stands in its life (migration 0021), and its number in the Mizan system.
+    stage VARCHAR(20) NOT NULL DEFAULT 'registration',
+    mizan_number VARCHAR(60),
+    CONSTRAINT legal_cases_stage_check
+        CHECK (stage IN ('registration', 'preparation', 'hearings', 'judgment', 'appeal', 'execution', 'closed')),
     CONSTRAINT legal_cases_office_case_key UNIQUE (office_id, case_id),
     CONSTRAINT legal_cases_office_number_key UNIQUE (office_id, case_number),
     CHECK (closed_at IS NULL OR closed_at >= opened_at)
@@ -1204,6 +1209,54 @@ CREATE TABLE IF NOT EXISTS notice_deliveries (
     FOREIGN KEY (office_id, notice_id) REFERENCES official_notices(office_id, notice_id) ON DELETE CASCADE
 );
 
+-- 15h. Case stage history and fee agreements with installments. See migration 0021.
+CREATE TABLE IF NOT EXISTS case_stage_history (
+    history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    from_stage VARCHAR(20),
+    to_stage VARCHAR(20) NOT NULL,
+    note VARCHAR(1000),
+    changed_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS fee_agreements (
+    agreement_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    client_id UUID NOT NULL,
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount > 0),
+    description VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'settled')),
+    -- A settlement closes what is left: unpaid installments are cancelled and, when the client pays
+    -- an agreed sum instead, one invoice for it is issued.
+    settled_at TIMESTAMPTZ,
+    settlement_amount NUMERIC(12, 2) CHECK (settlement_amount IS NULL OR settlement_amount >= 0),
+    settlement_note VARCHAR(1000),
+    settlement_invoice_id UUID REFERENCES invoices(invoice_id),
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fee_agreements_office_key UNIQUE (office_id, agreement_id),
+    CONSTRAINT fee_agreements_case_fkey FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE,
+    CONSTRAINT fee_agreements_client_fkey FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    CONSTRAINT fee_agreements_settled_check CHECK ((status = 'settled') = (settled_at IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS fee_installments (
+    installment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    agreement_id UUID NOT NULL,
+    sequence SMALLINT NOT NULL CHECK (sequence > 0),
+    due_on DATE NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    invoice_id UUID NOT NULL REFERENCES invoices(invoice_id),
+    CONSTRAINT fee_installments_sequence_key UNIQUE (agreement_id, sequence),
+    FOREIGN KEY (office_id, agreement_id) REFERENCES fee_agreements(office_id, agreement_id) ON DELETE CASCADE
+);
+
 -- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
@@ -1309,3 +1362,8 @@ CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(use
 CREATE INDEX IF NOT EXISTS idx_official_notices_case ON official_notices(case_id, sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_official_notices_client ON official_notices(client_id, sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notice_deliveries_notice ON notice_deliveries(notice_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_case_stage_history_case ON case_stage_history(case_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_agreements_case ON fee_agreements(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_agreements_client ON fee_agreements(client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_installments_agreement ON fee_installments(agreement_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_fee_installments_invoice ON fee_installments(invoice_id);

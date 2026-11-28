@@ -57,7 +57,10 @@ test('each kind is asked with exactly the values its query uses', async () => {
   const { calls, query } = fakeDatabase();
   await runReminders({ now: MORNING, query, env, channels: [] });
   const byKind = Object.fromEntries(calls.filter(({ sql }) => /AS kind/.test(sql)).map(({ sql, values }) => [/SELECT '(\w+)' AS kind/.exec(sql)[1], { sql, values }]));
-  assert.deepEqual(Object.keys(byKind), ['hearing', 'task', 'appointment', 'poa']);
+  assert.deepEqual(Object.keys(byKind), ['hearing', 'task', 'appointment', 'poa', 'installment']);
+  assert.deepEqual(byKind.installment.values, ['2026-11-27', '2026-11-28']);
+  assert.match(byKind.installment.sql, /i\.status IN \('unpaid', 'partially_paid'\)/, 'only installments still owed');
+  assert.match(byKind.installment.sql, /a\.status = 'active'/, 'not settled agreements');
   assert.deepEqual(byKind.hearing.values, ['Asia/Hebron', '2026-11-27', '2026-11-28', MORNING.toISOString()]);
   assert.deepEqual(byKind.task.values, ['Asia/Hebron', '2026-11-28']);
   assert.deepEqual(byKind.appointment.values, ['Asia/Hebron', '2026-11-27', MORNING.toISOString()]);

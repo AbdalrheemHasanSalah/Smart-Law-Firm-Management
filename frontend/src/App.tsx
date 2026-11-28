@@ -23,6 +23,7 @@ import { Tools } from './pages/Tools'
 import { LawPage, LegalLibrary, RulingPage } from './pages/LegalLibrary'
 import { LibraryImport } from './pages/LibraryImport'
 import { LetterheadSettings, Templates, VerifyDocument } from './pages/PrintSettings'
+import { ClientBriefcase } from './pages/Workflow'
 import { Shell } from './ui/Shell'
 import { SupportWidget } from './ui/SupportWidget'
 
@@ -67,6 +68,7 @@ export const App = () => (
       <Route path={`${PATHS.office}/activity`} element={office(<Activity />, ['admin'])} />
       <Route path={`${PATHS.office}/calendar`} element={office(<Calendar />)} />
       <Route path={`${PATHS.office}/finance`} element={office(<OfficeFinance />, ['admin'])} />
+      <Route path={`${PATHS.office}/clients/:clientId/briefcase`} element={office(<ClientBriefcase />)} />
       <Route path={`${PATHS.office}/clients/:clientId/statement`} element={office(<ClientStatement />, ['admin'])} />
       <Route path={`${PATHS.client}/statement`} element={<Require roles={['client']}><Shell><PortalStatement /></Shell></Require>} />
       <Route path={`${PATHS.office}/team`} element={office(<TeamPage />, ['admin'])} />
