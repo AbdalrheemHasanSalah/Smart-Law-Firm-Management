@@ -27,6 +27,7 @@ import legalLibraryRoutes from './legalLibraryRoutes.js';
 import caseAnalysisRoutes from './caseAnalysisRoutes.js';
 import draftingRoutes from './draftingRoutes.js';
 import voiceRoutes from './voiceRoutes.js';
+import portalRoutes from './portalRoutes.js';
 
 const router = Router();
 
@@ -35,6 +36,7 @@ router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, su
 router.use(legalLibraryRoutes);
 router.use(draftingRoutes);
 router.use(voiceRoutes);
+router.use(portalRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseAnalysisRoutes);
 router.use('/cases', caseRoutes);

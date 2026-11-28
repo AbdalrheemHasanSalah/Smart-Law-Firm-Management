@@ -301,6 +301,8 @@ export type Message = {
   receiver_user_id: string
   /** A voice message's recording, when it has one (the text may then be empty). */
   voice?: { clip_id: string; duration_seconds: number } | null
+  /** A file attached to the message (see lib/portalLink.ts). */
+  attachment?: { file_id: string; file_name: string; mime_type: 'application/pdf' | 'image/png' | 'image/jpeg'; size_bytes: number; status: 'new' | 'moved' | 'dismissed' } | null
 }
 
 export type NotificationItem = {

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CaseNotices as ClientNotices, IncomingFiles } from './PortalLink'
 import { appendText } from '@/lib/voice'
 import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
 import { Download, Plus, Search, Upload } from 'lucide-react'
@@ -309,6 +310,7 @@ const TABS = [
   ['prep', 'تحضير الجلسة'],
   ['analysis', 'التحليل'],
   ['drafting', 'الصياغة'],
+  ['client-notices', 'إشعارات الموكّل'],
 ] as const
 type TabKey = (typeof TABS)[number][0]
 
@@ -697,6 +699,7 @@ const CaseDocuments = ({ caseId }: { caseId: string }) => {
   const [sharing, setSharing] = useState<DocumentRecord | null>(null)
   return (
     <>
+      <IncomingFiles caseId={caseId} />
       <div className="mb-4 flex justify-end">
         <Button variant="ink" size="sm" onClick={() => setUploading(true)}>
           <Upload className="size-4" aria-hidden="true" />
@@ -817,6 +820,7 @@ export const CaseFile = () => {
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
       {tab === 'analysis' && <CaseAnalysis caseId={caseId} />}
       {tab === 'drafting' && <CaseDrafting caseId={caseId} />}
+      {tab === 'client-notices' && <ClientNotices caseId={caseId} />}
     </>
   )
 }

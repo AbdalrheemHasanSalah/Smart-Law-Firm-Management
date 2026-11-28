@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AttachButton, AttachmentView } from './PortalLink'
 import { appendText } from '@/lib/voice'
 import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
 import { ArrowRight, Search, Send, X } from 'lucide-react'
@@ -43,6 +44,7 @@ const dayOf = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric',
 const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) => {
   const { session } = useAuth()
   const me = session?.user.user_id
+  const isStaff = session?.role === 'admin' || session?.role === 'lawyer' || session?.role === 'assistant'
   const queryClient = useQueryClient()
   const [text, setText] = useState('')
   const end = useRef<HTMLDivElement>(null)
@@ -121,6 +123,7 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
                     )}
                   >
                     {message.voice && <VoicePlayer clip={message.voice} className="mb-1" />}
+                    {message.attachment && <AttachmentView attachment={message.attachment} mine={mine} staffCanMove={!mine && isStaff && contact.role === 'client'} />}
                     {message.body && <p className="leading-relaxed whitespace-pre-wrap">{message.body}</p>}
                     <p className={cn('mt-1 text-[0.68rem]', mine ? 'text-paper/60' : 'text-ink-faint')}>
                       {timeOf.format(new Date(message.sent_at))}
@@ -164,7 +167,14 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
             <Send className="size-5 rtl:-scale-x-100" aria-hidden="true" />
           </button>
         </div>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <AttachButton
+            onSend={async (fileId) => {
+              await api.post(`/messages/${contact.user_id}`, { attachment_file_id: fileId, ...(text.trim() ? { body: text.trim() } : {}) })
+              setText('')
+              void queryClient.invalidateQueries({ queryKey: ['messages'] })
+            }}
+          />
           <VoiceRecorder
             onSend={async (clip) => {
               await api.post(`/messages/${contact.user_id}`, { voice_clip_id: clip.clip_id })

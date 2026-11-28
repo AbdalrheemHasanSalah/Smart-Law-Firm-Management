@@ -33,6 +33,7 @@ import type { Consultation, PageSettings } from './publicPage'
 import { libraryRoutes } from './demoLibrary'
 import { analysisRoutes } from './demoAnalysis'
 import { demoVerification, draftingRoutes } from './demoDrafting'
+import { demoAttachment, portalRoutes } from './demoPortal'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1290,7 +1291,7 @@ const routes: Route[] = [
   }],
   ['post', /^\/messages\/([^/]+)$/, ALL, ({ user, params, body }) => {
     const contact = contactFor(user, params[0]!)
-    const message: Message = { message_id: uid('m'), body: String(body.body ?? '').trim(), voice: demoVoice(body.voice_clip_id), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
+    const message: Message = { message_id: uid('m'), body: String(body.body ?? '').trim(), voice: demoVoice(body.voice_clip_id), attachment: demoAttachment(body.attachment_file_id), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
     messages.push(message)
     notifications.push({ notification_id: uid('nt'), user_id: contact.user_id, title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${user.full_name}.`, notification_type: 'message', read_at: null, created_at: message.sent_at })
     return { message }
@@ -1301,6 +1302,20 @@ const routes: Route[] = [
   ...(analysisRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
   // drafting, letterhead and print codes
   ...(draftingRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // client files, chat attachments and official notices
+  ...(portalRoutes({
+    fail,
+    uid,
+    caseFor: caseFor as unknown as (user: never, caseId: string) => { case_id: string; case_number: string; title: string },
+    clientsOfCase: (caseId) =>
+      involves
+        .filter((link) => link.case_id === caseId)
+        .map((link) => ({
+          client_id: link.client_id,
+          full_name_or_org: clients.find((client) => client.client_id === link.client_id)?.full_name_or_org ?? '',
+          user_id: users.find((user) => user.client_id === link.client_id)?.user_id ?? null,
+        })),
+  }) as Route[]),
 ]
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {

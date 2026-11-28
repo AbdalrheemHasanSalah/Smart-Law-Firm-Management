@@ -16,6 +16,7 @@
  *     content itself (note text, file names), so nothing confidential travels by email and a
  *     client is never told about something they may not see.
  */
+import { pushToUser } from './pushService.js';
 import { query as databaseQuery } from '../config/db.js';
 import { getSecurityConfig } from '../config/security.js';
 import { escapeHtml, sendMail as deliverMail } from './mailService.js';
@@ -75,7 +76,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric',
 const CASE_LABEL ='SELECT case_number, title FROM legal_cases WHERE case_id = $1 AND office_id = $2';
 const OFFICE_NAME = 'SELECT name FROM law_offices WHERE office_id = $1';
 
-function appUrl(pathname) {
+export function appUrl(pathname) {
   const [origin] = getSecurityConfig().trustedOrigins;
   return `${origin}${pathname}`;
 }
@@ -361,6 +362,7 @@ export async function notify(event, payload, { query = databaseQuery, sendMail =
            VALUES ($1, $2, $3, $4, $5)`,
           [title, body, type, person.user_id, officeId]
         );
+        await pushToUser(person.user_id, { title, body, url: path }, query);
       }
       if (await sendMail({ to: person.email, ...email })) sent += 1;
     }

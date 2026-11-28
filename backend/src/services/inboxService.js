@@ -9,6 +9,7 @@
  * another office is answered exactly like one that does not exist.
  */
 import { assertOwnFreeClip, attachClip, publicVoice, VOICE_COLUMNS } from './voiceService.js';
+import { assertOwnFreeFile, ATTACHMENT_COLUMNS, attachFile, publicAttachment } from './sharedFileService.js';
 import { query as databaseQuery } from '../config/db.js';
 import { hasOfficeContext } from './officeScope.js';
 
@@ -128,16 +129,20 @@ export async function getThread(actor, userId, { query = databaseQuery } = {}) {
     parameters
   );
   const result = await query(
-    `SELECT m.message_id, m.body, m.sent_at, m.read_at, m.sender_user_id, m.receiver_user_id, ${VOICE_COLUMNS}
+    `SELECT m.message_id, m.body, m.sent_at, m.read_at, m.sender_user_id, m.receiver_user_id, ${VOICE_COLUMNS}, ${ATTACHMENT_COLUMNS}
      FROM messages m
      LEFT JOIN voice_clips v ON v.message_id = m.message_id
+     LEFT JOIN shared_files sf ON sf.message_id = m.message_id
      WHERE m.office_id = $1
        AND ((m.sender_user_id = $2 AND m.receiver_user_id = $3) OR (m.sender_user_id = $3 AND m.receiver_user_id = $2))
      ORDER BY m.sent_at DESC, m.message_id
      LIMIT ${THREAD_LIMIT}`,
     parameters
   );
-  const messages = result.rows.map(({ voice_clip_id: _clip, voice_duration_seconds: _seconds, ...row }) => ({ ...row, voice: publicVoice({ voice_clip_id: _clip, voice_duration_seconds: _seconds }) }));
+  const messages = result.rows.map((row) => {
+    const { voice_clip_id: _clip, voice_duration_seconds: _seconds, attachment_file_id: _file, attachment_name: _name, attachment_mime: _mime, attachment_size: _size, attachment_status: _status, ...rest } = row;
+    return { ...rest, voice: publicVoice(row), attachment: publicAttachment(row) };
+  });
   return { contact, messages: messages.reverse() };
 }
 
@@ -147,16 +152,18 @@ export async function getThread(actor, userId, { query = databaseQuery } = {}) {
  */
 export async function sendMessage(actor, userId, body, { query = databaseQuery } = {}) {
   assertActor(actor);
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => field !== 'body' && field !== 'voice_clip_id')) {
-    throw new InboxServiceError(400, 'Request body must contain only the message body and an optional recording.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => !['body', 'voice_clip_id', 'attachment_file_id'].includes(field))) {
+    throw new InboxServiceError(400, 'Request body must contain only the message body, an optional recording and an optional attachment.');
   }
   const text = typeof body.body === 'string' ? body.body.trim() : '';
   const clipId = body.voice_clip_id ?? null;
-  if (text.length > MAX_MESSAGE_LENGTH || (!text && !clipId)) {
-    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters, or a recording must be attached.`);
+  const fileId = body.attachment_file_id ?? null;
+  if (text.length > MAX_MESSAGE_LENGTH || (!text && !clipId && !fileId)) {
+    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters, or a recording or file must be attached.`);
   }
   const contact = await findContact(actor, userId, query);
   const duration = clipId ? await assertOwnFreeClip(actor, clipId, query) : null;
+  const file = fileId ? await assertOwnFreeFile(actor, fileId, query) : null;
   const result = await query(
     `INSERT INTO messages (body, message_type, sender_user_id, receiver_user_id, office_id)
      VALUES ($1, '${clipId ? 'voice' : 'direct'}', $2, $3, $4)
@@ -164,14 +171,20 @@ export async function sendMessage(actor, userId, body, { query = databaseQuery }
     [text, actor.user_id, userId, actor.office_id]
   );
   const message = result.rows[0];
-  if (clipId) {
-    if (!(await attachClip(actor, clipId, { messageId: message.message_id }, query))) {
-      await query('DELETE FROM messages WHERE message_id = $1 AND office_id = $2', [message.message_id, actor.office_id]);
-      throw new InboxServiceError(400, 'The recording was not found or is already used.');
-    }
-    return { message: { ...message, voice: { clip_id: clipId, duration_seconds: duration } }, contact };
-  }
-  return { message: { ...message, voice: null }, contact };
+  const undo = async (what) => {
+    await query('DELETE FROM messages WHERE message_id = $1 AND office_id = $2', [message.message_id, actor.office_id]);
+    throw new InboxServiceError(400, `The ${what} was not found or is already used.`);
+  };
+  if (clipId && !(await attachClip(actor, clipId, { messageId: message.message_id }, query))) await undo('recording');
+  if (fileId && !(await attachFile(actor, fileId, message.message_id, query))) await undo('attachment');
+  return {
+    message: {
+      ...message,
+      voice: clipId ? { clip_id: clipId, duration_seconds: duration } : null,
+      attachment: file ? { file_id: file.file_id, file_name: file.file_name, mime_type: file.mime_type, size_bytes: file.size_bytes, status: 'new' } : null,
+    },
+    contact,
+  };
 }
 
 export async function countUnreadMessages(actor, { query = databaseQuery } = {}) {

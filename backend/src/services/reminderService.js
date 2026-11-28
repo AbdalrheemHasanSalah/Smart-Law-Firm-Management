@@ -1,4 +1,5 @@
 import { query as databaseQuery } from '../config/db.js';
+import { pushToUser } from './pushService.js';
 import { getSecurityConfig } from '../config/security.js';
 import { sendMail as deliverMail } from './mailService.js';
 import { notificationEmail } from './notificationService.js';
@@ -198,6 +199,13 @@ export function defaultChannels({ query, sendMail }) {
           [message.title, message.body, person.user_id, officeId]
         );
         return true;
+      },
+    },
+    {
+      // On the person's phone or computer, when they turned push notifications on there.
+      name: 'push',
+      async deliver({ person, message }) {
+        return (await pushToUser(person.user_id, { title: message.title, body: message.body, url: message.path }, query)) > 0;
       },
     },
     {

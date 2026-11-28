@@ -209,6 +209,9 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   // Voice.
   [/^رسالة صوتية مدتها (\d+:\d{2})$/, 'Voice message, $1 long'],
   [/^رسالة صوتية \((\d+:\d{2})\) — لا تُشغَّل في وضع التجربة بعد إعادة تحميل الصفحة$/, 'Voice message ($1): in demo mode it no longer plays after the page reloads'],
+  // Client files and notices.
+  [/^(\d+) ملفات تنتظر$/, '$1 files waiting'],
+  [/^إلى (.+)$/, 'To $1'],
   // Parts joined with " · " (a citation, a date and a name…): each part on its own.
   [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".

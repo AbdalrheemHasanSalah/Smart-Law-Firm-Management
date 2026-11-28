@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { MyNotices, PushToggle, SendToOffice } from './PortalLink'
 import { VoicePlayer } from '@/ui/Voice'
 import { motion } from 'motion/react'
 import { CalendarClock, Download, FileText } from 'lucide-react'
@@ -98,6 +99,8 @@ export const Portal = () => {
   return (
     <>
       <SheetHeader title="قضاياي" note="ما يشاركه مكتبك معك يظهر هنا." />
+      <PushToggle className="mb-6" />
+      <MyNotices />
       {hearings.data && hearings.data.length > 0 && <UpcomingHearings hearings={hearings.data} />}
       {cases.isPending ? (
         <Loading />
@@ -149,6 +152,7 @@ export const Portal = () => {
           ))}
         </ul>
       )}
+      {cases.data && <SendToOffice cases={cases.data} />}
       <MyPowers />
     </>
   )
