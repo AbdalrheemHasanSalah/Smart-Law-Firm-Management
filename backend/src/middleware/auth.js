@@ -1,6 +1,7 @@
 import { auth } from '../config/auth.js';
 import { query } from '../config/db.js';
 import { isSubscriptionLocked } from '../config/subscription.js';
+import { effectivePermissions, NEW_ROLES, permissionFor, ROLE_DEFAULTS, STAFF_ROLES } from '../config/permissions.js';
 
 export function isSessionExpired(session) {
   if (!session?.session?.expiresAt) {
@@ -40,6 +41,9 @@ export async function getCurrentUserFromRequest(request, session) {
         u.updated_at,
         CASE WHEN office.office_id IS NOT NULL THEN membership.role_id END AS role_id,
         CASE WHEN office.office_id IS NOT NULL THEN r.role_name END AS role,
+        CASE WHEN office.office_id IS NOT NULL THEN membership.is_owner END AS is_owner,
+        CASE WHEN office.office_id IS NOT NULL THEN membership.permissions_granted END AS permissions_granted,
+        CASE WHEN office.office_id IS NOT NULL THEN membership.permissions_revoked END AS permissions_revoked,
         office.office_id,
         office.subscription_ends_at
       FROM app_users u
@@ -97,10 +101,47 @@ export async function requireAuth(request, response, next) {
     }
 
     request.user = user;
+    const denied = applyPermissionGate(request);
+    if (denied) return response.status(403).json(denied);
     return next();
   } catch (error) {
     return next(error);
   }
+}
+
+/**
+ * Applies the office permission map (config/permissions.js) to a staff member's request. Records
+ * the real role and the permissions on `request.user`, and returns an error body when the request
+ * is refused. New roles act as the office admin on the routes their permissions open, and as an
+ * assistant on their own things; built-in roles keep their behaviour unless the owner revoked or
+ * granted the route's permission.
+ */
+export function applyPermissionGate(request) {
+  const user = request.user;
+  if (!user?.office_id || !STAFF_ROLES.has(user.role) || user.office_role) return null;
+  const role = user.role;
+  const permissions = effectivePermissions(user);
+  user.office_role = role;
+  user.permissions = [...permissions];
+  const required = permissionFor(request.method, request.originalUrl ?? request.url ?? '');
+  if (required === 'session') return null;
+  const refused = { code: 'PERMISSION_DENIED', error: 'Your role in this office does not allow this action.' };
+  if (NEW_ROLES.has(role)) {
+    if (required === 'open') {
+      user.role = 'assistant';
+      return null;
+    }
+    if (required && required !== 'client' && permissions.has(required)) {
+      user.role = 'admin';
+      return null;
+    }
+    return refused;
+  }
+  if (!required || required === 'open' || required === 'client') return null;
+  const byDefault = (ROLE_DEFAULTS[role] ?? []).includes(required);
+  if (byDefault && !permissions.has(required)) return refused;
+  if (!byDefault && permissions.has(required)) user.role = 'admin';
+  return null;
 }
 
 /**

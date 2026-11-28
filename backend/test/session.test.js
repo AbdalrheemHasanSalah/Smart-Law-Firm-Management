@@ -252,7 +252,7 @@ test('Better Auth session authenticates the current-user endpoint without exposi
   assert.equal(body.user.email, 'test@example.com');
   assert.equal(body.role, 'client');
   assert.equal(body.active_office.office_id, activeMembership.office_id);
-  assert.deepEqual(body.memberships, [activeMembership]);
+  assert.deepEqual(body.memberships, [{ ...activeMembership, permissions: [] }], 'a client membership carries no office permissions');
   assert.equal(Object.hasOwn(body.user, 'password_hash'), false);
   assert.equal(JSON.stringify(body).includes('must-not-be-exposed'), false);
 });

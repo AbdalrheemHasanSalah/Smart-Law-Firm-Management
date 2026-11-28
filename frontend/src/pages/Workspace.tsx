@@ -1,4 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CaseNotices as ClientNotices, IncomingFiles } from './PortalLink'
+import { appendText } from '@/lib/voice'
+import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
 import { Download, Plus, Search, Upload } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -33,8 +36,13 @@ import { HearingPrepTab } from '@/ui/HearingPrep'
 import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
+import { CaseLibrary } from './LegalLibrary'
+import { CaseAnalysis } from './CaseAnalysis'
+import { CaseDrafting } from './Drafting'
 import { CaseHearings, CaseNotices } from './CaseSessions'
 import { CaseProfit } from './FinanceOffice'
+import { CaseFeeAgreements, StageBar } from './Workflow'
+import { useAdminFor, useCan } from '@/lib/permissions'
 
 /* ───────────────────────── shared ───────────────────────── */
 
@@ -267,7 +275,7 @@ export const NewCase = ({ open, onClose, client }: { open: boolean; onClose: () 
 }
 
 export const Cases = () => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('cases.edit')
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
   const cases = useCases(search)
@@ -298,14 +306,18 @@ const TABS = [
   ['notes', 'الملاحظات'],
   ['documents', 'المستندات'],
   ['powers', 'التوكيلات'],
+  ['library', 'المراجع القانونية'],
   ['tasks', 'المهام'],
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
+  ['analysis', 'التحليل'],
+  ['drafting', 'الصياغة'],
+  ['client-notices', 'إشعارات الموكّل'],
 ] as const
 type TabKey = (typeof TABS)[number][0]
 
 const People = ({ caseId }: { caseId: string }) => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('cases.edit')
   const queryClient = useQueryClient()
   const relationships = useQuery({
     queryKey: ['relationships', caseId],
@@ -436,7 +448,7 @@ const EMPTY_OPPONENT = { full_name: '', national_id: '', phone: '' }
 
 /** The other side of the case. Adding one checks it against the office's clients first. */
 const Opponents = ({ caseId }: { caseId: string }) => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('cases.edit')
   const queryClient = useQueryClient()
   const opponents = useQuery({
     queryKey: ['opponents', caseId],
@@ -543,7 +555,8 @@ const Notes = ({ caseId }: { caseId: string }) => {
           <ul className="space-y-3">
             {notes.data.map((note) => (
               <li key={note.note_id} className={cn('border-s-4 bg-paper-shade p-4', note.visibility === 'client_visible' ? 'border-stamp-green' : note.visibility === 'internal' ? 'border-ink' : 'border-stamp-blue')}>
-                <p className="leading-relaxed whitespace-pre-wrap text-ink">{note.body}</p>
+                {note.voice && <VoicePlayer clip={note.voice} className="mb-2" />}
+                {note.body && <p className="leading-relaxed whitespace-pre-wrap text-ink">{note.body}</p>}
                 <p className="mt-2 text-xs text-ink-soft">
                   {formatDate(note.created_at)} · {VISIBILITY[note.visibility]?.text}
                 </p>
@@ -560,11 +573,23 @@ const Notes = ({ caseId }: { caseId: string }) => {
         className="h-fit space-y-3 rounded-lg border border-ink/15 p-4"
       >
         <TextArea label="ملاحظة جديدة" name="note" rows={4} required value={body} onChange={(event) => setBody(event.target.value)} />
+        <DictateButton onText={(spoken) => setBody((current) => appendText(current, spoken))} />
         <SelectField label="من يراها؟" name="visibility" options={visibilityOptions} value={visibility} onChange={(event) => setVisibility(event.target.value)} />
         {add.isError && <p role="alert" className="text-sm text-stamp">{messageOf(add.error)}</p>}
         <Button type="submit" variant="ink" disabled={!body.trim() || add.isPending} className="w-full">
           {add.isPending ? 'تُحفظ…' : 'أضف الملاحظة'}
         </Button>
+        <div className="border-t border-rule pt-3">
+          <p className="mb-2 text-xs text-ink-soft">أو سجّل ملاحظة صوتية (حتى دقيقتين)، بالخصوصية المختارة أعلاه:</p>
+          <VoiceRecorder
+            sendLabel="احفظ الملاحظة"
+            onSend={async (clip) => {
+              await api.post(`/cases/${caseId}/notes`, { voice_clip_id: clip.clip_id, visibility, ...(body.trim() ? { body: body.trim() } : {}) })
+              setBody('')
+              void queryClient.invalidateQueries({ queryKey: ['notes', caseId] })
+            }}
+          />
+        </div>
       </form>
     </div>
   )
@@ -676,6 +701,7 @@ const CaseDocuments = ({ caseId }: { caseId: string }) => {
   const [sharing, setSharing] = useState<DocumentRecord | null>(null)
   return (
     <>
+      <IncomingFiles caseId={caseId} />
       <div className="mb-4 flex justify-end">
         <Button variant="ink" size="sm" onClick={() => setUploading(true)}>
           <Upload className="size-4" aria-hidden="true" />
@@ -691,7 +717,7 @@ const CaseDocuments = ({ caseId }: { caseId: string }) => {
 
 /** What the case has cost its clients so far: fees, court fees and expenses, per currency. */
 const CaseFinance = ({ caseId }: { caseId: string }) => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('finance.manage')
   const invoices = useInvoices({ case_id: caseId })
   const relationships = useQuery({
     queryKey: ['relationships', caseId],
@@ -706,6 +732,7 @@ const CaseFinance = ({ caseId }: { caseId: string }) => {
         {owner && <AddButton onClick={() => setBilling(true)}>مطالبة جديدة</AddButton>}
       </div>
       {owner && <CaseProfit caseId={caseId} />}
+      <CaseFeeAgreements caseId={caseId} />
       {invoices.isPending ? (
         <Loading />
       ) : invoices.isError ? (
@@ -725,6 +752,7 @@ const CaseFinance = ({ caseId }: { caseId: string }) => {
 
 export const CaseFile = () => {
   const { caseId = '' } = useParams()
+  const edits = useCan()('cases.edit')
   const queryClient = useQueryClient()
   const [tabParam, setTabParam] = useParam('tab')
   const tab = oneOf(tabParam, TABS.map(([key]) => key), 'people')
@@ -764,11 +792,12 @@ export const CaseFile = () => {
           {row.description && <p className="mt-3 max-w-2xl leading-relaxed text-ink">{row.description}</p>}
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <QuickSelect caption label="حالة القضية" value={row.status} options={optionsOf(CASE_STATUS)} disabled={update.isPending} onChange={(status) => update.mutate({ status: status as LegalCase['status'] })} />
-          <QuickSelect caption label="أولوية القضية" value={row.priority} options={optionsOf(PRIORITY)} disabled={update.isPending} onChange={(priority) => update.mutate({ priority: priority as LegalCase['priority'] })} />
+          <QuickSelect caption label="حالة القضية" value={row.status} options={optionsOf(CASE_STATUS)} disabled={update.isPending || !edits} onChange={(status) => update.mutate({ status: status as LegalCase['status'] })} />
+          <QuickSelect caption label="أولوية القضية" value={row.priority} options={optionsOf(PRIORITY)} disabled={update.isPending || !edits} onChange={(priority) => update.mutate({ priority: priority as LegalCase['priority'] })} />
         </div>
       </div>
       {update.isError && <p role="alert" className="mb-4 text-sm text-stamp">{messageOf(update.error)}</p>}
+      <StageBar caseId={caseId} />
 
       <div role="tablist" aria-label="أقسام القضية" className="mb-6 flex flex-wrap gap-1 border-b border-rule">
         {TABS.map(([key, label]) => (
@@ -790,9 +819,13 @@ export const CaseFile = () => {
       {tab === 'notes' && <Notes caseId={caseId} />}
       {tab === 'documents' && <CaseDocuments caseId={caseId} />}
       {tab === 'powers' && <CasePowers caseId={caseId} />}
+      {tab === 'library' && <CaseLibrary caseId={caseId} />}
       {tab === 'tasks' && (caseTasks.length === 0 ? <Empty>لا مهام مرتبطة بهذه القضية.</Empty> : <TasksTable rows={caseTasks} />)}
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
+      {tab === 'analysis' && <CaseAnalysis caseId={caseId} />}
+      {tab === 'drafting' && <CaseDrafting caseId={caseId} />}
+      {tab === 'client-notices' && <ClientNotices caseId={caseId} />}
     </>
   )
 }
@@ -813,7 +846,9 @@ const ClientForm = ({
   /** Opens a new case for this client (office administrator only). */
   onNewCase?: (client: Client) => void
 }) => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('clients.edit')
+  // Portal invitations stay with the office owner (office.manage).
+  const inviter = useIsOwner()
   const queryClient = useQueryClient()
   const [values, setValues] = useState(EMPTY_CLIENT)
   // A new client may be invited to the client portal right away, by the email entered here.
@@ -869,7 +904,7 @@ const ClientForm = ({
     },
   })
   const identityLocked = client !== null && !owner
-  const sendsInvite = owner && client === null && invite && values.email.trim() !== ''
+  const sendsInvite = inviter && client === null && invite && values.email.trim() !== ''
   return (
     <Modal open={open} onClose={onClose} title={client ? 'بيانات الموكّل' : 'موكّل جديد'}>
       {created ? (
@@ -908,7 +943,7 @@ const ClientForm = ({
         <Field label="الهاتف" name="phone" dir="ltr" value={values.phone} onChange={set('phone')} />
         <Field label="البريد الإلكتروني" name="email" type="email" dir="ltr" value={values.email} onChange={set('email')} />
         <Field label="العنوان" name="address" value={values.address} onChange={set('address')} className="sm:col-span-2" />
-        {owner && client === null && (
+        {inviter && client === null && (
           <label className="flex items-start gap-2 text-sm text-ink sm:col-span-2">
             <input type="checkbox" checked={invite} onChange={(event) => setInvite(event.target.checked)} className="mt-0.5 size-4 accent-ink" />
             <span>
@@ -1068,7 +1103,10 @@ const PortalActions = ({ client, onInvite }: { client: Client; onInvite: (client
 }
 
 export const Clients = () => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('clients.edit')
+  const inviter = useIsOwner()
+  const createsCases = useAdminFor('cases.edit')
+  const seesMoney = useAdminFor('finance.manage')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Client | 'new' | null>(null)
   const [inviting, setInviting] = useState<Client | null>(null)
@@ -1096,7 +1134,7 @@ export const Clients = () => {
       ) : clients.data.length === 0 ? (
         <Empty>لا موكّلين مطابقين.</Empty>
       ) : (
-        <Table head={owner ? ['الاسم', 'النوع', 'الهاتف', 'البريد', 'البوابة', 'أُضيف', ''] : ['الاسم', 'النوع', 'الهاتف', 'البريد', 'أُضيف', '']}>
+        <Table head={inviter ? ['الاسم', 'النوع', 'الهاتف', 'البريد', 'البوابة', 'أُضيف', ''] : ['الاسم', 'النوع', 'الهاتف', 'البريد', 'أُضيف', '']}>
           {clients.data.map((client) => (
             <tr key={client.client_id} className={ROW}>
               <td className={cn(TD, 'font-semibold')}>{client.full_name_or_org}</td>
@@ -1107,23 +1145,26 @@ export const Clients = () => {
               <td className={TD}>
                 <bdi>{client.email ?? '—'}</bdi>
               </td>
-              {owner && (
+              {inviter && (
                 <td className={TD}>
                   <PortalActions client={client} onInvite={setInviting} />
                 </td>
               )}
               <td className={cn(TD, 'whitespace-nowrap text-ink-soft')}>{formatDate(client.created_at)}</td>
               <td className={cn(TD, 'text-end whitespace-nowrap')}>
-                {owner && (
-                  <>
-                    <button type="button" onClick={() => setNewCaseFor(client)} className="me-3 text-xs font-semibold text-stamp underline-offset-4 hover:underline">
-                      قضية جديدة
-                    </button>
-                    <Link to={`/office/clients/${client.client_id}/statement`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
-                      كشف حساب
-                    </Link>
-                  </>
+                {createsCases && (
+                  <button type="button" onClick={() => setNewCaseFor(client)} className="me-3 text-xs font-semibold text-stamp underline-offset-4 hover:underline">
+                    قضية جديدة
+                  </button>
                 )}
+                {seesMoney && (
+                  <Link to={`/office/clients/${client.client_id}/statement`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
+                    كشف حساب
+                  </Link>
+                )}
+                <Link to={`/office/clients/${client.client_id}/briefcase`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
+                  الحقيبة
+                </Link>
                 <Link to={`/office/powers-of-attorney?client=${client.client_id}`} className="me-3 text-xs font-semibold text-ink-soft underline-offset-4 hover:text-stamp hover:underline">
                   التوكيلات
                 </Link>
@@ -1136,8 +1177,8 @@ export const Clients = () => {
         </Table>
       )}
       <ClientForm client={editing === 'new' ? null : editing} open={editing !== null} onClose={() => setEditing(null)} onNewCase={setNewCaseFor} />
-      {owner && <PortalInvite client={inviting} onClose={() => setInviting(null)} />}
-      {owner && <NewCase open={newCaseFor !== null} client={newCaseFor} onClose={() => setNewCaseFor(null)} />}
+      {inviter && <PortalInvite client={inviting} onClose={() => setInviting(null)} />}
+      {createsCases && <NewCase open={newCaseFor !== null} client={newCaseFor} onClose={() => setNewCaseFor(null)} />}
     </>
   )
 }
@@ -1339,7 +1380,7 @@ const TASK_FILTERS = [['open', 'المفتوحة'], ['completed', 'المنجز�
 const TASK_VIEWS = [['assigned', 'المهام المسندة'], ['private', 'مهامي الخاصة']] as const
 
 export const Tasks = () => {
-  const owner = useIsOwner()
+  const owner = useAdminFor('schedule.edit')
   const tasks = useTasks()
   const cases = useCases()
   const [filterParam, setFilterParam] = useParam('filter')
@@ -1553,7 +1594,16 @@ const Invite = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
           className="space-y-4"
         >
           <Field label="بريد المدعوّ" name="email" type="email" dir="ltr" required value={values.email} onChange={set('email')} />
-          <SelectField label="الدور" name="role" options={[['lawyer', 'محامٍ'], ['assistant', 'مساعد قانوني']]} value={values.role} onChange={set('role')} />
+          <SelectField
+            label="الدور"
+            name="role"
+            options={[['lawyer', 'محامٍ'], ['assistant', 'مساعد قانوني'], ['accountant', 'محاسب'], ['data_entry', 'مُدخل بيانات'], ['print_only', 'طباعة فقط']]}
+            value={values.role}
+            onChange={set('role')}
+          />
+          <p className="text-xs text-ink-soft">
+            المحاسب: المالية كاملة مع الاطلاع على القضايا دون تعديلها. مُدخل البيانات: الموكّلون والقضايا والمستندات والجلسات، دون مالية ولا حذف. الطباعة فقط: الاطلاع والطباعة. تعدّل صلاحيات كل عضو لاحقاً من «الأمان والصلاحيات».
+          </p>
           <p className="text-xs text-ink-soft">لدعوة موكّل إلى بوابته افتح صفحة «الموكّلون».</p>
           <FormActions error={create.isError ? messageOf(create.error) : null}>
             <Button variant="line" onClick={close}>

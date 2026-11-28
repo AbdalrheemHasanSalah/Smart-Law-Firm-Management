@@ -8,6 +8,8 @@
  * The rule is enforced in SQL on every read and write, so a user ID guessed or taken from
  * another office is answered exactly like one that does not exist.
  */
+import { assertOwnFreeClip, attachClip, publicVoice, VOICE_COLUMNS } from './voiceService.js';
+import { assertOwnFreeFile, ATTACHMENT_COLUMNS, attachFile, publicAttachment } from './sharedFileService.js';
 import { query as databaseQuery } from '../config/db.js';
 import { hasOfficeContext } from './officeScope.js';
 
@@ -127,34 +129,62 @@ export async function getThread(actor, userId, { query = databaseQuery } = {}) {
     parameters
   );
   const result = await query(
-    `SELECT message_id, body, sent_at, read_at, sender_user_id, receiver_user_id
-     FROM messages
-     WHERE office_id = $1
-       AND ((sender_user_id = $2 AND receiver_user_id = $3) OR (sender_user_id = $3 AND receiver_user_id = $2))
-     ORDER BY sent_at DESC, message_id
+    `SELECT m.message_id, m.body, m.sent_at, m.read_at, m.sender_user_id, m.receiver_user_id, ${VOICE_COLUMNS}, ${ATTACHMENT_COLUMNS}
+     FROM messages m
+     LEFT JOIN voice_clips v ON v.message_id = m.message_id
+     LEFT JOIN shared_files sf ON sf.message_id = m.message_id
+     WHERE m.office_id = $1
+       AND ((m.sender_user_id = $2 AND m.receiver_user_id = $3) OR (m.sender_user_id = $3 AND m.receiver_user_id = $2))
+     ORDER BY m.sent_at DESC, m.message_id
      LIMIT ${THREAD_LIMIT}`,
     parameters
   );
-  return { contact, messages: result.rows.reverse() };
+  const messages = result.rows.map((row) => {
+    const { voice_clip_id: _clip, voice_duration_seconds: _seconds, attachment_file_id: _file, attachment_name: _name, attachment_mime: _mime, attachment_size: _size, attachment_status: _status, ...rest } = row;
+    return { ...rest, voice: publicVoice(row), attachment: publicAttachment(row) };
+  });
+  return { contact, messages: messages.reverse() };
 }
 
+/**
+ * A text message, a voice message (an uploaded recording's voice_clip_id, see voiceService.js),
+ * or both: a voice message may carry a short text with it.
+ */
 export async function sendMessage(actor, userId, body, { query = databaseQuery } = {}) {
   assertActor(actor);
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => field !== 'body')) {
-    throw new InboxServiceError(400, 'Request body must contain only the message body.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => !['body', 'voice_clip_id', 'attachment_file_id'].includes(field))) {
+    throw new InboxServiceError(400, 'Request body must contain only the message body, an optional recording and an optional attachment.');
   }
   const text = typeof body.body === 'string' ? body.body.trim() : '';
-  if (!text || text.length > MAX_MESSAGE_LENGTH) {
-    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters.`);
+  const clipId = body.voice_clip_id ?? null;
+  const fileId = body.attachment_file_id ?? null;
+  if (text.length > MAX_MESSAGE_LENGTH || (!text && !clipId && !fileId)) {
+    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters, or a recording or file must be attached.`);
   }
   const contact = await findContact(actor, userId, query);
+  const duration = clipId ? await assertOwnFreeClip(actor, clipId, query) : null;
+  const file = fileId ? await assertOwnFreeFile(actor, fileId, query) : null;
   const result = await query(
     `INSERT INTO messages (body, message_type, sender_user_id, receiver_user_id, office_id)
-     VALUES ($1, 'direct', $2, $3, $4)
+     VALUES ($1, '${clipId ? 'voice' : 'direct'}', $2, $3, $4)
      RETURNING message_id, body, sent_at, read_at, sender_user_id, receiver_user_id`,
     [text, actor.user_id, userId, actor.office_id]
   );
-  return { message: result.rows[0], contact };
+  const message = result.rows[0];
+  const undo = async (what) => {
+    await query('DELETE FROM messages WHERE message_id = $1 AND office_id = $2', [message.message_id, actor.office_id]);
+    throw new InboxServiceError(400, `The ${what} was not found or is already used.`);
+  };
+  if (clipId && !(await attachClip(actor, clipId, { messageId: message.message_id }, query))) await undo('recording');
+  if (fileId && !(await attachFile(actor, fileId, message.message_id, query))) await undo('attachment');
+  return {
+    message: {
+      ...message,
+      voice: clipId ? { clip_id: clipId, duration_seconds: duration } : null,
+      attachment: file ? { file_id: file.file_id, file_name: file.file_name, mime_type: file.mime_type, size_bytes: file.size_bytes, status: 'new' } : null,
+    },
+    contact,
+  };
 }
 
 export async function countUnreadMessages(actor, { query = databaseQuery } = {}) {
@@ -174,7 +204,7 @@ export async function listNotifications(actor, { query = databaseQuery } = {}) {
   const parameters = [actor.office_id, actor.user_id];
   const [list, unread] = await Promise.all([
     query(
-      `SELECT notification_id, title, body, notification_type, read_at, created_at
+      `SELECT notification_id, title, body, notification_type, link_path, read_at, created_at
        FROM notifications
        WHERE office_id = $1 AND user_id = $2
        ORDER BY created_at DESC, notification_id
@@ -188,6 +218,30 @@ export async function listNotifications(actor, { query = databaseQuery } = {}) {
     ),
   ]);
   return { notifications: list.rows, unread: unread.rows[0]?.unread ?? 0 };
+}
+
+/** "Clear all": removes the actor's notifications in the active office. */
+export async function clearNotifications(actor, { query = databaseQuery } = {}) {
+  assertActor(actor);
+  const result = await query(
+    'DELETE FROM notifications WHERE office_id = $1 AND user_id = $2',
+    [actor.office_id, actor.user_id]
+  );
+  return { deleted: result.rowCount ?? 0 };
+}
+
+/** Marks one of the actor's notifications read (it was opened). Someone else's is left alone. */
+export async function markNotificationRead(actor, notificationId, { query = databaseQuery } = {}) {
+  assertActor(actor);
+  if (typeof notificationId !== 'string' || !UUID_PATTERN.test(notificationId)) {
+    throw new InboxServiceError(400, 'notificationId must be a valid UUID.');
+  }
+  const result = await query(
+    `UPDATE notifications SET read_at = NOW()
+     WHERE notification_id = $1 AND office_id = $2 AND user_id = $3 AND read_at IS NULL`,
+    [notificationId, actor.office_id, actor.user_id]
+  );
+  return { updated: result.rowCount ?? 0 };
 }
 
 export async function markNotificationsRead(actor, { query = databaseQuery } = {}) {

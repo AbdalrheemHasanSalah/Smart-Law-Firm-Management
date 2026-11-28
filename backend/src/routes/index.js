@@ -23,12 +23,28 @@ import officeFinanceRoutes from './officeFinanceRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import hrRoutes from './hrRoutes.js';
 import publicPageRoutes from './publicPageRoutes.js';
+import legalLibraryRoutes from './legalLibraryRoutes.js';
+import caseAnalysisRoutes from './caseAnalysisRoutes.js';
+import draftingRoutes from './draftingRoutes.js';
+import voiceRoutes from './voiceRoutes.js';
+import portalRoutes from './portalRoutes.js';
+import workflowRoutes from './workflowRoutes.js';
+import directoryRoutes from './directoryRoutes.js';
+import securityRoutes from './securityRoutes.js';
 
 const router = Router();
 
 router.use(publicPageRoutes);
 router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, subscriptionRoutes, conflictRoutes, supportRoutes);
+router.use(legalLibraryRoutes);
+router.use(draftingRoutes);
+router.use(voiceRoutes);
+router.use(portalRoutes);
+router.use(workflowRoutes);
+router.use(directoryRoutes);
+router.use(securityRoutes);
 router.use('/clients', clientRoutes);
+router.use('/cases', caseAnalysisRoutes);
 router.use('/cases', caseRoutes);
 router.use('/documents', documentRoutes);
 router.use('/contracts', contractRoutes);

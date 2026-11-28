@@ -6,6 +6,8 @@ import {
   listInvitationsController,
   listMembershipsController,
   listPlatformOfficesController,
+  markAllOfficesSeenController,
+  markOfficeSeenController,
   previewInvitationController,
   registerOfficeController,
   reviewOfficeController,
@@ -42,6 +44,8 @@ router.post('/invitations/:token/accept', invitationLookupLimit, requireAuth, ac
 
 // Platform administration of offices.
 router.get('/platform/offices', requireAuth, requirePlatformAdmin, listPlatformOfficesController);
+router.post('/platform/offices/seen', requireAuth, requirePlatformAdmin, markAllOfficesSeenController);
+router.post('/platform/offices/:officeId/seen', requireAuth, requirePlatformAdmin, markOfficeSeenController);
 router.patch('/platform/offices/:officeId', requireAuth, requirePlatformAdmin, reviewOfficeController);
 router.patch('/platform/users/:userId/status', requireAuth, requirePlatformAdmin, updateAccountStatusController);
 

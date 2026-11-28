@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { STAFF_ROLES } from '@/lib/permissions'
 import { AlertTriangle, FileCheck2, Plus, Upload } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -371,7 +372,7 @@ const ToggleStatus = ({ power, onClose }: { power: PowerOfAttorney | null; onClo
 /** Editing and status actions for the viewer's role: assistants edit but do not revoke. */
 const usePowerActions = () => {
   const role = useOfficeRole()
-  const staff = role === 'admin' || role === 'lawyer' || role === 'assistant'
+  const staff = role != null && STAFF_ROLES.includes(role)
   const [editing, setEditing] = useState<PowerOfAttorney | 'new' | null>(null)
   const [toggling, setToggling] = useState<PowerOfAttorney | null>(null)
   return {

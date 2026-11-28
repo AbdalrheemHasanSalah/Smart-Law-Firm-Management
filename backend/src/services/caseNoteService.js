@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { assertOwnFreeClip, attachClip, publicVoice, VOICE_COLUMNS } from './voiceService.js';
 import { officeCondition } from './officeScope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,11 +85,13 @@ function validateBody(body, { create = false, actorRole } = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     invalid('Request body must be a JSON object.');
   }
-  const allowed = new Set(['body', 'visibility']);
+  const allowed = new Set(create ? ['body', 'visibility', 'voice_clip_id'] : ['body', 'visibility']);
   if (Object.keys(body).some((field) => !allowed.has(field))) {
     invalid('Request contains unsupported note fields.');
   }
-  if (create && !Object.hasOwn(body, 'body')) {
+  // A voice note may have no text; any other note needs its text.
+  const voice = create && body.voice_clip_id !== undefined && body.voice_clip_id !== null;
+  if (create && !voice && !Object.hasOwn(body, 'body')) {
     invalid('body is required.');
   }
   if (!create && Object.keys(body).length === 0) {
@@ -96,12 +99,13 @@ function validateBody(body, { create = false, actorRole } = {}) {
   }
 
   const fields = {};
-  if (Object.hasOwn(body, 'body')) {
+  if (Object.hasOwn(body, 'body') && !(voice && (body.body === '' || body.body === null))) {
     if (typeof body.body !== 'string' || !body.body.trim() || body.body.length > MAX_BODY_LENGTH) {
       invalid(`body must contain 1 to ${MAX_BODY_LENGTH} characters.`);
     }
     fields.body = body.body.trim();
   }
+  if (voice) fields.voiceClipId = body.voice_clip_id;
   if (Object.hasOwn(body, 'visibility')) {
     if (!VISIBILITIES.has(body.visibility)) {
       invalid('visibility is not supported.');
@@ -142,7 +146,7 @@ function noteAccessScope(actor, parameters, alias = 'n') {
 }
 
 function publicNote(row) {
-  return Object.fromEntries(PUBLIC_FIELDS.map((field) => [field, row[field]]));
+  return { ...Object.fromEntries(PUBLIC_FIELDS.map((field) => [field, row[field]])), voice: publicVoice(row) };
 }
 
 function mapDatabaseError(error) {
@@ -183,8 +187,9 @@ export async function listCaseNotes(actor, caseId, queryParameters = {}) {
   const total = count.rows[0].total;
   const pageParameters = [...parameters, pageSize, offset];
   const result = await execute(
-    `SELECT n.note_id, n.body, n.visibility, n.created_at, n.updated_at, n.case_id
+    `SELECT n.note_id, n.body, n.visibility, n.created_at, n.updated_at, n.case_id, ${VOICE_COLUMNS}
        FROM case_notes n
+       LEFT JOIN voice_clips v ON v.note_id = n.note_id
       WHERE n.case_id = $1
         ${scope}
         ${searchClause}
@@ -208,7 +213,8 @@ export async function createCaseNote(actor, caseId, body) {
   assertActor(actor, ['admin', 'lawyer', 'assistant']);
   validateUuid(caseId, 'caseId');
   const fields = validateBody(body, { create: true, actorRole: actor.role });
-  const parameters = [fields.body, fields.visibility ?? 'internal', actor.user_id, caseId];
+  const duration = fields.voiceClipId ? await assertOwnFreeClip(actor, fields.voiceClipId) : null;
+  const parameters = [fields.body ?? '', fields.visibility ?? 'internal', actor.user_id, caseId];
   const officeClause = officeCondition(actor, parameters, 'lc');
   parameters.push(actor.role === 'admin');
   const result = await execute(
@@ -231,7 +237,15 @@ export async function createCaseNote(actor, caseId, body) {
     parameters
   );
   if (!result.rowCount) throw new CaseNoteServiceError(404, 'Case not found.');
-  return publicNote(result.rows[0]);
+  const note = result.rows[0];
+  if (fields.voiceClipId) {
+    if (!(await attachClip(actor, fields.voiceClipId, { noteId: note.note_id }))) {
+      await execute('DELETE FROM case_notes WHERE note_id = $1 AND office_id = $2', [note.note_id, actor.office_id]);
+      invalid('The recording was not found or is already used.');
+    }
+    return publicNote({ ...note, voice_clip_id: fields.voiceClipId, voice_duration_seconds: duration });
+  }
+  return publicNote(note);
 }
 
 export async function updateCaseNote(actor, noteId, body) {

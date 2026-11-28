@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, CalendarPlus, Calculator, ExternalLink, ListPlus, Scale } from 'lucide-react'
+import { CalendarClock, CalendarPlus, CalendarRange, Calculator, CarFront, ExternalLink, ListPlus, Scale } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PATHS, personaOf, useAuth } from '@/auth/auth'
 import { api, messageOf } from '@/lib/api'
-import { formatDay, formatMoney, ROLE } from '@/lib/labels'
+import { formatDate, formatDay, formatMoney, ROLE } from '@/lib/labels'
 import type { CaseRelationships, Member } from '@/lib/types'
 import {
+  ACCIDENT_SOURCE,
+  computeAccident,
   computeDeadline,
+  computePeriod,
   computeLaborRights,
   deadlineIcs,
   DEADLINE_RULES,
@@ -270,6 +273,172 @@ const LaborTool = () => {
   )
 }
 
+/* ───────────────────────── period between two dates ───────────────────────── */
+
+const PeriodTool = () => {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState(todayString())
+  const result = computePeriod(from, to)
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="من تاريخ" name="period_from" type="date" dir="ltr" value={from} onChange={(event) => setFrom(event.target.value)} />
+        <Field label="إلى تاريخ" name="period_to" type="date" dir="ltr" value={to} onChange={(event) => setTo(event.target.value)} />
+      </div>
+      <div className="rounded-md border border-ink/20 bg-paper/60 p-5" aria-live="polite">
+        {!result ? (
+          <p className="text-sm text-ink-soft">اختر التاريخين لحساب المدة بينهما.</p>
+        ) : (
+          <>
+            <p className="text-2xl text-ink">
+              {result.years} سنة، {result.months} شهر، {result.days} يوم
+            </p>
+            <p className="mt-1 text-sm text-ink-soft">
+              {result.totalDays} يوماً · {result.weeks} أسبوعاً{result.reversed ? ' · التاريخ الثاني قبل الأول' : ''}
+            </p>
+          </>
+        )}
+        <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+          الأيام تُعدّ من اليوم التالي للتاريخ الأول حتى التاريخ الثاني شاملاً. الشهر يُحسب من نفس اليوم في الشهر التالي، أو آخر يوم فيه إن كان أقصر.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ───────────────────────── road accident compensation ───────────────────────── */
+
+const AccidentTool = () => {
+  const [kind, setKind] = useState<'injury' | 'death'>('injury')
+  const [values, setValues] = useState({
+    accident: '', report: '', disability: '', nights: '', share: '', income: '', average: '', bulletin: '', until: '', years: '', discount: '', currency: 'ILS',
+  })
+  const [surgery, setSurgery] = useState(false)
+  const set = (key: keyof typeof values) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }))
+  const result = computeAccident({
+    kind,
+    accidentDay: values.accident,
+    finalReportDay: values.report || undefined,
+    disabilityPercent: Number(values.disability) || 0,
+    hospitalNights: Number(values.nights) || 0,
+    surgeryWithStay: surgery,
+    dependantsSharePercent: Number(values.share) || 0,
+    monthlyIncome: Number(values.income) || 0,
+    sectorAverageWage: Number(values.average) || 0,
+    temporaryUntilDay: values.until || undefined,
+    futureYears: Number(values.years) || 0,
+    immediateDiscountPercent: Number(values.discount) || 0,
+  })
+  const wage = (amount: number) => formatMoney(amount, values.currency)
+  const jod = (amount: number) => formatMoney(amount, 'JOD')
+  const injury = kind === 'injury'
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="space-y-5">
+        <div className="flex gap-2" role="radiogroup" aria-label="نوع المطالبة">
+          {([['injury', 'إصابة'], ['death', 'وفاة']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={kind === key}
+              onClick={() => setKind(key)}
+              className={cn('rounded-full border px-4 py-1.5 text-sm font-semibold', kind === key ? 'border-ink bg-ink text-paper' : 'border-ink/20 text-ink-soft hover:border-ink')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="تاريخ الحادث" name="acc_day" type="date" dir="ltr" required value={values.accident} onChange={set('accident')} />
+          <Field label="تاريخ التقرير الطبي النهائي (اختياري)" name="acc_report" type="date" dir="ltr" value={values.report} onChange={set('report')} />
+        </div>
+        {injury ? (
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-2 text-sm font-semibold text-ink">الضرر المعنوي (بالدينار)</legend>
+            <Field label="نسبة العجز الدائم %" name="acc_disability" type="number" min="0" max="100" step="any" dir="ltr" value={values.disability} onChange={set('disability')} />
+            <Field label="ليالي المكوث في المشفى" name="acc_nights" type="number" min="0" dir="ltr" value={values.nights} onChange={set('nights')} />
+            <label className="flex items-center gap-2 text-sm text-ink sm:col-span-2">
+              <input type="checkbox" checked={surgery} onChange={(event) => setSurgery(event.target.checked)} className="size-4" />
+              أُجريت له عملية جراحية استلزمت المكوث في المشفى
+            </label>
+          </fieldset>
+        ) : (
+          <Field label="حصة الورثة المعالين من التركة % (حجة حصر الإرث)" name="acc_share" type="number" min="0" max="100" step="any" dir="ltr" value={values.share} onChange={set('share')} />
+        )}
+        {injury && (
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-2 text-sm font-semibold text-ink">الضرر المادي (بعملة الأجر)</legend>
+            <Field label="دخل المصاب الشهري قبل الحادث" name="acc_income" type="number" min="0" step="any" dir="ltr" value={values.income} onChange={set('income')} />
+            <SelectField label="العملة" name="acc_currency" value={values.currency} onChange={set('currency')} options={CURRENCIES} />
+            <Field label="معدل أجور حقله الاقتصادي (الإحصاء)" name="acc_average" type="number" min="0" step="any" dir="ltr" value={values.average} onChange={set('average')} />
+            <Field label="النشرة المعتمدة (اختياري)" name="acc_bulletin" placeholder="مثلاً: مسح القوى العاملة، الربع الثاني 2026" value={values.bulletin} onChange={set('bulletin')} />
+            <Field label="آخر يوم في العجز المؤقت" name="acc_until" type="date" dir="ltr" value={values.until} onChange={set('until')} />
+            <span aria-hidden="true" className="hidden sm:block" />
+            <Field label="سنوات الخسارة المستقبلية (اجتهاد)" name="acc_years" type="number" min="0" max="60" step="any" dir="ltr" value={values.years} onChange={set('years')} />
+            <Field label="خصم الدفع الفوري % (اجتهاد)" name="acc_discount" type="number" min="0" max="100" step="any" dir="ltr" value={values.discount} onChange={set('discount')} />
+          </fieldset>
+        )}
+      </div>
+
+      <div className="rounded-md border border-ink/20 bg-paper/60 p-5" aria-live="polite">
+        {!result ? (
+          <p className="text-sm text-ink-soft">أدخل تاريخ الحادث وبيانات الإصابة لحساب التعويض.</p>
+        ) : (
+          <>
+            {injury && result.cappedMonthlyWage !== null && (
+              <p className="mb-3 text-xs text-ink-soft">
+                الأجر المعتمد شهرياً: <span className="font-semibold text-ink" dir="ltr">{wage(result.cappedMonthlyWage)}</span>
+                {result.wageWasCapped && ' — خُفّض إلى مثلي معدل الأجور (المادة 155)'}
+                {values.bulletin.trim() && ` · ${values.bulletin.trim()}`}
+              </p>
+            )}
+            <ul className="divide-y divide-rule">
+              {result.lines.map((line) => (
+                <li key={line.key} className="py-2.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-semibold text-ink">{line.label}</span>
+                    <span className="text-sm text-ink tabular-nums whitespace-nowrap" dir="ltr">
+                      {line.upTo ? '≤ ' : ''}
+                      {line.currency === 'JOD' ? jod(line.amount) : wage(line.amount)}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-ink-faint">{line.note}</p>
+                </li>
+              ))}
+            </ul>
+            <dl className="mt-3 space-y-1 border-t-2 border-ink pt-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="font-semibold text-ink">{injury ? 'الضرر المعنوي' : 'المستحق للورثة'}</dt>
+                <dd className="text-2xl text-stamp tabular-nums" dir="ltr">{jod(result.moralTotal)}</dd>
+              </div>
+              {result.materialTotal > 0 && (
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="font-semibold text-ink">الضرر المادي</dt>
+                  <dd className="text-2xl text-stamp tabular-nums" dir="ltr">{wage(result.materialTotal)}</dd>
+                </div>
+              )}
+            </dl>
+            <ul className="mt-4 space-y-1 text-xs text-ink-soft">
+              <li>
+                آخر موعد لرفع الدعوى: <span className="font-semibold text-ink">{formatDate(`${result.limitationDay}T12:00:00`)}</span>
+                {result.limitationFromReport ? ' (من تاريخ التقرير الطبي النهائي)' : ' (ثلاث سنوات من الحادث)'} — المادة 159
+              </li>
+              {result.urgentMonthly !== null && result.urgentMaxTotal !== null && (
+                <li>
+                  الدفعة المستعجلة الشهرية بحد أقصى <span dir="ltr">{wage(result.urgentMonthly)}</span>، ولا تتجاوز 12 دفعة (<span dir="ltr">{wage(result.urgentMaxTotal)}</span>) — المادتان 160 و165
+                </li>
+              )}
+            </ul>
+          </>
+        )}
+        <Disclaimer source={ACCIDENT_SOURCE} />
+      </div>
+    </div>
+  )
+}
+
 /* ───────────────────────── official links ───────────────────────── */
 
 const OfficialLinks = () => (
@@ -304,6 +473,12 @@ export const Tools = () => (
       </Section>
       <Section icon={Calculator} title="حاسبة الحقوق العمالية" note="مكافأة نهاية الخدمة وبدل الإشعار والفصل التعسفي والإجازات.">
         <LaborTool />
+      </Section>
+      <Section icon={CarFront} title="حاسبة تعويض حوادث الطرق" note="الضرر المعنوي والعجز المؤقت والدائم والوفاة والتقادم، وفق قانون التأمين.">
+        <AccidentTool />
+      </Section>
+      <Section icon={CalendarRange} title="حاسبة المدد" note="المدة بين تاريخين بالسنوات والأشهر والأيام.">
+        <PeriodTool />
       </Section>
       <Section icon={Scale} title="روابط رسمية سريعة" note="الجهات التي يحتاجها المحامي يومياً، في مكان واحد.">
         <OfficialLinks />

@@ -39,6 +39,8 @@ const noteRecord = {
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: null,
   case_id: caseId,
+  // Notes now say whether they carry a voice recording (phase 4); these have none.
+  voice: null,
 };
 const otherNoteRecord = {
   ...noteRecord,

@@ -1,4 +1,5 @@
 import { pool, query } from '../config/db.js';
+import { effectivePermissions, STAFF_ROLES } from '../config/permissions.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -104,6 +105,8 @@ function publicMembership(row) {
     role: row.role,
     membership_status: row.membership_status,
     is_owner: row.is_owner,
+    // Staff only: what the member may do in this office (config/permissions.js).
+    permissions: STAFF_ROLES.has(row.role) ? [...effectivePermissions(row)] : [],
   };
 }
 
@@ -214,7 +217,9 @@ export async function listMemberships(account) {
         office.city AS office_city,
         r.role_name AS role,
         membership.status AS membership_status,
-        membership.is_owner
+        membership.is_owner,
+        membership.permissions_granted,
+        membership.permissions_revoked
        FROM office_memberships membership
        JOIN law_offices office ON office.office_id = membership.office_id
        JOIN roles r ON r.role_id = membership.role_id

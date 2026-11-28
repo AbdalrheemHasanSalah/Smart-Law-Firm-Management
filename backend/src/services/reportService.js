@@ -1,3 +1,4 @@
+import { can } from '../config/permissions.js';
 import { officeProfitability } from './accountService.js';
 import { assertActor, dayRange, execute, forbidden, invalid, money, uuid } from './financeInput.js';
 import { officeCondition } from './officeScope.js';
@@ -146,7 +147,7 @@ export async function officeReport(actor, queryParameters = {}) {
     finance: null,
   };
 
-  if (whole) {
+  if (whole && can(actor, 'finance.manage')) {
     const money_ = {};
     const totalFor = (currency) => (money_[currency] ??= { currency, billed: 0, collected: 0 });
     for (const row of rows.billed) totalFor(row.currency).billed = money(row.billed);

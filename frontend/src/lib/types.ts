@@ -1,6 +1,6 @@
 /** Shapes returned by the backend (snake_case, exactly as the API sends them). */
 
-export type OfficeRole = 'admin' | 'lawyer' | 'assistant' | 'client'
+export type OfficeRole = 'admin' | 'lawyer' | 'assistant' | 'client' | 'accountant' | 'data_entry' | 'print_only'
 export type OfficeStatus = 'pending' | 'active' | 'rejected' | 'suspended'
 export type Portal = 'owner' | 'staff' | 'client'
 
@@ -12,6 +12,8 @@ export type Membership = {
   role: OfficeRole
   membership_status: 'active' | 'suspended'
   is_owner: boolean
+  /** Staff only: what the member may do in this office. */
+  permissions?: string[]
 }
 
 export type Session = {
@@ -216,6 +218,8 @@ export type CaseNote = {
   created_at: string
   updated_at: string | null
   case_id: string
+  /** A voice note's recording, when it has one (the text may then be empty). */
+  voice?: { clip_id: string; duration_seconds: number } | null
 }
 
 export type DocumentRecord = {
@@ -280,6 +284,8 @@ export type PlatformOffice = {
   owner_email: string
   owner_account_status: string
   owner_bar_number: string | null
+  /** When a platform administrator first opened the request; null while it is unread. */
+  platform_seen_at?: string | null
 }
 
 export type Contact = {
@@ -297,6 +303,10 @@ export type Message = {
   read_at: string | null
   sender_user_id: string
   receiver_user_id: string
+  /** A voice message's recording, when it has one (the text may then be empty). */
+  voice?: { clip_id: string; duration_seconds: number } | null
+  /** A file attached to the message (see lib/portalLink.ts). */
+  attachment?: { file_id: string; file_name: string; mime_type: 'application/pdf' | 'image/png' | 'image/jpeg'; size_bytes: number; status: 'new' | 'moved' | 'dismissed' } | null
 }
 
 export type NotificationItem = {
@@ -304,6 +314,8 @@ export type NotificationItem = {
   title: string
   body: string
   notification_type: string
+  /** The page it opens, set by the server; missing on notifications created before links existed. */
+  link_path?: string | null
   read_at: string | null
   created_at: string
 }

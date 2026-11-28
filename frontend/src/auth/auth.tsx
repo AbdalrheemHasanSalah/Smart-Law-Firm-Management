@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Navigate, useLocation } from 'react-router'
 import { api, setUnauthorizedHandler } from '@/lib/api'
 import type { OfficeRole, Portal, Session } from '@/lib/types'
+import { actsAsAdminFor, type Permission } from '@/lib/permissionRules'
 
 type AuthState = {
   status: 'loading' | 'ready'
@@ -128,10 +129,13 @@ const Loading = () => (
 export const Require = ({
   children,
   roles,
+  permission,
   platform = false,
 }: {
   children: ReactNode
   roles?: readonly OfficeRole[]
+  /** Also lets in a member who acts as the admin for this permission (an accountant on finance, say). */
+  permission?: Permission
   platform?: boolean
 }) => {
   const { status, session } = useAuth()
@@ -139,7 +143,8 @@ export const Require = ({
   if (status === 'loading') return <Loading />
   if (!session) return <Navigate to={PATHS.login} replace state={{ from: location.pathname }} />
   if (platform && !session.user.is_platform_admin) return <Navigate to={homeOf(session)} replace />
-  if (roles && (!session.role || !roles.includes(session.role))) return <Navigate to={homeOf(session)} replace />
+  const allowed = !roles || (session.role !== null && roles.includes(session.role)) || (permission !== undefined && actsAsAdminFor(session, permission))
+  if (!allowed) return <Navigate to={homeOf(session)} replace />
   return children
 }
 

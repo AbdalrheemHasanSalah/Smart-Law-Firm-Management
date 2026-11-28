@@ -1,4 +1,4 @@
-import { listAuditLog } from '../services/auditService.js';
+import { listAuditLog, verifyAuditChain } from '../services/auditService.js';
 import { checkConflicts } from '../services/conflictService.js';
 import { addOpponent, listOpponents, removeOpponent } from '../services/opponentService.js';
 
@@ -40,6 +40,14 @@ export async function removeOpponentController(request, response, next) {
 export async function listAuditLogController(request, response, next) {
   try {
     return response.status(200).json(await listAuditLog(request.user, request.query));
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function verifyAuditChainController(request, response, next) {
+  try {
+    return response.status(200).json(await verifyAuditChain(request.user));
   } catch (error) {
     return next(error);
   }

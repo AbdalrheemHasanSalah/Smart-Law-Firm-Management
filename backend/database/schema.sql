@@ -14,7 +14,10 @@ INSERT INTO roles (role_name, description) VALUES
     ('admin', 'Law office administrator'),
     ('lawyer', 'Lawyer or attorney'),
     ('assistant', 'Law firm assistant or staff member'),
-    ('client', 'Client portal user')
+    ('client', 'Client portal user'),
+    ('accountant', 'Office accountant: finance, read-only cases and clients'),
+    ('data_entry', 'Data entry: clients, cases, documents and schedule, without finance or deleting'),
+    ('print_only', 'Print only: reads cases and documents and prints them')
 ON CONFLICT (role_name) DO NOTHING;
 
 -- 3. Better Auth identity and session storage
@@ -106,7 +109,9 @@ CREATE TABLE IF NOT EXISTS law_offices (
     -- Paid (or trial) access runs until this moment; NULL means no subscription is tracked.
     subscription_ends_at TIMESTAMPTZ,
     -- The subscription_ends_at value a renewal reminder was last sent for.
-    subscription_reminder_sent_for TIMESTAMPTZ
+    subscription_reminder_sent_for TIMESTAMPTZ,
+    -- When a platform administrator first opened this office's request (NULL: not opened yet).
+    platform_seen_at TIMESTAMPTZ
 );
 
 -- Office subscription payments: recorded by the platform owner, or paid online by the office.
@@ -152,6 +157,8 @@ CREATE TABLE IF NOT EXISTS office_memberships (
     status VARCHAR(20) NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'suspended')),
     is_owner BOOLEAN NOT NULL DEFAULT FALSE,
+    permissions_granted TEXT[] NOT NULL DEFAULT '{}',
+    permissions_revoked TEXT[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (office_id, user_id)
@@ -219,7 +226,14 @@ CREATE TABLE IF NOT EXISTS courts (
     court_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(150) NOT NULL,
     location TEXT,
-    court_type VARCHAR(50)
+    court_type VARCHAR(50),
+    city VARCHAR(80),
+    phone VARCHAR(40),
+    email VARCHAR(150),
+    working_hours VARCHAR(150),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
 );
 
 -- 7. Legal cases
@@ -237,6 +251,11 @@ CREATE TABLE IF NOT EXISTS legal_cases (
     description TEXT,
     court_id UUID REFERENCES courts(court_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    -- Where the case stands in its life (migration 0023), and its number in the Mizan system.
+    stage VARCHAR(20) NOT NULL DEFAULT 'registration',
+    mizan_number VARCHAR(60),
+    CONSTRAINT legal_cases_stage_check
+        CHECK (stage IN ('registration', 'preparation', 'hearings', 'judgment', 'appeal', 'execution', 'closed')),
     CONSTRAINT legal_cases_office_case_key UNIQUE (office_id, case_id),
     CONSTRAINT legal_cases_office_number_key UNIQUE (office_id, case_number),
     CHECK (closed_at IS NULL OR closed_at >= opened_at)
@@ -273,6 +292,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     title VARCHAR(200) NOT NULL,
     body TEXT NOT NULL,
     notification_type VARCHAR(50) NOT NULL,
+    -- the page the notification opens (an internal path, set by the server)
+    link_path VARCHAR(300),
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id UUID NOT NULL REFERENCES app_users(user_id),
@@ -410,7 +431,10 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     ip_address INET,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id UUID REFERENCES app_users(user_id),
-    office_id UUID REFERENCES law_offices(office_id)
+    office_id UUID REFERENCES law_offices(office_id),
+    chain_seq BIGINT,
+    prev_hash CHAR(64),
+    entry_hash CHAR(64)
 );
 
 -- Legal references are a shared library across all offices.
@@ -862,6 +886,488 @@ CREATE TABLE IF NOT EXISTS case_opponents (
     FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
 );
 
+-- 15c. Legal library (المكتبة القانونية): legislation, rulings and the Official Gazette shared by
+-- every office, plus each office's saved items, principles and case references. See migration 0018.
+CREATE OR REPLACE FUNCTION legal_normalize(input TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT regexp_replace(
+        translate(COALESCE(input, ''), 'أإآٱىةؤئ٠١٢٣٤٥٦٧٨٩', 'اااايهوي0123456789'),
+        '[ً-ْٰـ]', '', 'g'
+    )
+$$;
+
+-- The normalized text, then each word again without its leading clitics when 3+ letters remain.
+CREATE OR REPLACE FUNCTION legal_search_text(input TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT legal_normalize(input) || ' ' || regexp_replace(
+        legal_normalize(input),
+        '(^|[^ء-يa-zA-Z0-9])(وال|بال|كال|فال|لل|ال|و|ف|ب|ل|ك)([ء-ي]{3,})',
+        '\1\3',
+        'g'
+    )
+$$;
+
+CREATE TABLE IF NOT EXISTS gazette_issues (
+    issue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_key VARCHAR(120) NOT NULL UNIQUE,
+    issue_number INTEGER NOT NULL CHECK (issue_number > 0),
+    published_on DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS legal_laws (
+    law_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_key VARCHAR(120) NOT NULL UNIQUE,
+    jurisdiction VARCHAR(2) NOT NULL CHECK (jurisdiction IN ('ps', 'jo', 'eg')),
+    law_kind VARCHAR(20) NOT NULL
+        CHECK (law_kind IN ('law', 'decree_law', 'regulation', 'decree', 'decision', 'order', 'other')),
+    title VARCHAR(500) NOT NULL,
+    law_number VARCHAR(40),
+    law_year SMALLINT CHECK (law_year BETWEEN 1800 AND 2200),
+    status VARCHAR(20) NOT NULL DEFAULT 'in_force' CHECK (status IN ('in_force', 'amended', 'repealed')),
+    status_note TEXT,
+    published_on DATE,
+    gazette_issue_id UUID REFERENCES gazette_issues(issue_id) ON DELETE SET NULL,
+    source_url TEXT,
+    search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('simple', legal_search_text(title))) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS legal_articles (
+    article_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    law_id UUID NOT NULL REFERENCES legal_laws(law_id) ON DELETE CASCADE,
+    article_number VARCHAR(40) NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    body TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'in_force' CHECK (status IN ('in_force', 'amended', 'repealed')),
+    note TEXT,
+    search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('simple', legal_search_text(body))) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT legal_articles_law_number_key UNIQUE (law_id, article_number)
+);
+
+CREATE TABLE IF NOT EXISTS legal_rulings (
+    ruling_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_key VARCHAR(120) NOT NULL UNIQUE,
+    jurisdiction VARCHAR(2) NOT NULL CHECK (jurisdiction IN ('ps', 'jo', 'eg')),
+    court_level VARCHAR(20) NOT NULL
+        CHECK (court_level IN ('cassation', 'high', 'constitutional', 'appeal', 'first_instance', 'magistrate', 'other')),
+    court_name VARCHAR(200),
+    case_number VARCHAR(60),
+    ruling_year SMALLINT CHECK (ruling_year BETWEEN 1800 AND 2200),
+    decided_on DATE,
+    subject VARCHAR(500),
+    summary TEXT,
+    body TEXT NOT NULL,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', legal_search_text(COALESCE(subject, '') || ' ' || COALESCE(summary, ''))), 'A')
+        || setweight(to_tsvector('simple', legal_search_text(body)), 'D')
+    ) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- The articles a ruling applied.
+CREATE TABLE IF NOT EXISTS legal_ruling_articles (
+    ruling_id UUID NOT NULL REFERENCES legal_rulings(ruling_id) ON DELETE CASCADE,
+    article_id UUID NOT NULL REFERENCES legal_articles(article_id) ON DELETE CASCADE,
+    PRIMARY KEY (ruling_id, article_id)
+);
+
+-- What each Gazette issue published, in order. `law_id` links an item to an imported law.
+CREATE TABLE IF NOT EXISTS gazette_issue_items (
+    issue_id UUID NOT NULL REFERENCES gazette_issues(issue_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    title VARCHAR(500) NOT NULL,
+    law_id UUID REFERENCES legal_laws(law_id) ON DELETE SET NULL,
+    PRIMARY KEY (issue_id, position)
+);
+
+-- Everyday wording mapped to legal terms: "انطرد من الشغل" → {"فصل تعسفي"}. Phrases are stored
+-- normalized, so a search matches them however hamza or taa marbuta were typed.
+CREATE TABLE IF NOT EXISTS legal_synonyms (
+    phrase VARCHAR(200) PRIMARY KEY,
+    terms TEXT[] NOT NULL CHECK (cardinality(terms) BETWEEN 1 AND 10),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One row per import run, dry runs excluded, for the platform admin's history.
+CREATE TABLE IF NOT EXISTS legal_library_imports (
+    import_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    file_name VARCHAR(200),
+    summary JSONB NOT NULL,
+    imported_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- An article or ruling an office saved, with its note and tags.
+CREATE TABLE IF NOT EXISTS office_library_items (
+    item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    article_id UUID REFERENCES legal_articles(article_id) ON DELETE CASCADE,
+    ruling_id UUID REFERENCES legal_rulings(ruling_id) ON DELETE CASCADE,
+    note TEXT,
+    tags TEXT[] NOT NULL DEFAULT '{}' CHECK (cardinality(tags) <= 10),
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT office_library_items_office_key UNIQUE (office_id, item_id),
+    CONSTRAINT office_library_items_target_check CHECK ((article_id IS NULL) <> (ruling_id IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_office_library_items_article
+    ON office_library_items(office_id, article_id) WHERE article_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_office_library_items_ruling
+    ON office_library_items(office_id, ruling_id) WHERE ruling_id IS NOT NULL;
+
+-- Principles the office adopts, in its own words.
+CREATE TABLE IF NOT EXISTS office_legal_principles (
+    principle_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    tags TEXT[] NOT NULL DEFAULT '{}' CHECK (cardinality(tags) <= 10),
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT office_legal_principles_office_key UNIQUE (office_id, principle_id)
+);
+
+-- An article or ruling linked to one of the office's cases.
+CREATE TABLE IF NOT EXISTS case_legal_references (
+    reference_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    article_id UUID REFERENCES legal_articles(article_id) ON DELETE CASCADE,
+    ruling_id UUID REFERENCES legal_rulings(ruling_id) ON DELETE CASCADE,
+    note TEXT,
+    linked_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT case_legal_references_target_check CHECK ((article_id IS NULL) <> (ruling_id IS NULL)),
+    CONSTRAINT case_legal_references_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_article
+    ON case_legal_references(case_id, article_id) WHERE article_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_ruling
+    ON case_legal_references(case_id, ruling_id) WHERE ruling_id IS NOT NULL;
+
+-- 15d. Case analysis tools: each AI tool run on a case. See migration 0019.
+CREATE TABLE IF NOT EXISTS case_ai_analyses (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    tool VARCHAR(30) NOT NULL CHECK (tool IN (
+        'argument', 'legal_question', 'gaps_defenses', 'document', 'appeal_grounds',
+        'contract_review', 'judgment', 'brief_check', 'minutes', 'translate'
+    )),
+    question TEXT,
+    target_language VARCHAR(2) CHECK (target_language IS NULL OR target_language IN ('en', 'he', 'fr')),
+    model_name VARCHAR(100),
+    provider VARCHAR(20),
+    result JSONB NOT NULL,
+    redaction JSONB NOT NULL DEFAULT '{}'::jsonb,
+    tasks_created_at TIMESTAMPTZ,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT case_ai_analyses_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
+-- 15e. Drafting and printing: letterhead, templates, case drafts, issued documents. See migration 0020.
+CREATE TABLE IF NOT EXISTS office_letterheads (
+    office_id UUID PRIMARY KEY REFERENCES law_offices(office_id),
+    display_name VARCHAR(200),
+    subtitle VARCHAR(200),
+    address TEXT,
+    phone VARCHAR(60),
+    email VARCHAR(254),
+    license_number VARCHAR(100),
+    footer_text VARCHAR(500),
+    logo_key TEXT UNIQUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS document_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('contract', 'pleading', 'letter', 'other')),
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT document_templates_office_key UNIQUE (office_id, template_id)
+);
+
+CREATE TABLE IF NOT EXISTS case_drafts (
+    draft_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('contract', 'pleading', 'letter', 'other')),
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    -- Where it started: a built-in skeleton, an office template, the AI, or a blank page.
+    source VARCHAR(20) NOT NULL CHECK (source IN ('builtin', 'template', 'ai', 'blank')),
+    source_ref VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'final', 'revoked')),
+    finalized_at TIMESTAMPTZ,
+    finalized_by_user_id UUID REFERENCES app_users(user_id),
+    revoked_at TIMESTAMPTZ,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT case_drafts_office_key UNIQUE (office_id, draft_id),
+    CONSTRAINT case_drafts_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE,
+    CONSTRAINT case_drafts_final_check CHECK ((status = 'draft') = (finalized_at IS NULL)),
+    CONSTRAINT case_drafts_revoked_check CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))
+);
+
+-- The verification code is short enough to type from paper: 10 characters with no 0/O or 1/I.
+CREATE TABLE IF NOT EXISTS issued_documents (
+    issued_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    code VARCHAR(12) NOT NULL UNIQUE,
+    kind VARCHAR(30) NOT NULL CHECK (kind IN (
+        'contract', 'pleading', 'letter', 'other', 'statement', 'hearing_prep', 'analysis', 'invoice', 'report'
+    )),
+    content_sha256 CHAR(64) NOT NULL,
+    draft_id UUID,
+    issued_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    CONSTRAINT issued_documents_draft_fkey FOREIGN KEY (office_id, draft_id)
+        REFERENCES case_drafts(office_id, draft_id) ON DELETE SET NULL (draft_id)
+);
+
+-- 15f. Voice recordings attached to messages and case notes. See migration 0021.
+CREATE TABLE IF NOT EXISTS voice_clips (
+    clip_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    owner_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    storage_key TEXT NOT NULL UNIQUE,
+    mime_type VARCHAR(30) NOT NULL CHECK (mime_type IN ('audio/webm', 'audio/ogg', 'audio/mp4')),
+    duration_seconds SMALLINT NOT NULL CHECK (duration_seconds BETWEEN 1 AND 120),
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE,
+    note_id UUID REFERENCES case_notes(note_id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT voice_clips_one_place_check CHECK (message_id IS NULL OR note_id IS NULL)
+);
+
+-- 15g. Client files, push subscriptions and official notices. See migration 0022.
+CREATE TABLE IF NOT EXISTS shared_files (
+    file_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    uploaded_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    -- 'portal': a client sent it to the office for a case; 'message': a chat attachment.
+    purpose VARCHAR(10) NOT NULL CHECK (purpose IN ('portal', 'message')),
+    -- Set when a client sent it: whose file it is, and where it now waits for the office.
+    client_id UUID,
+    case_id UUID,
+    message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE,
+    storage_key TEXT NOT NULL UNIQUE,
+    mime_type VARCHAR(30) NOT NULL CHECK (mime_type IN ('application/pdf', 'image/png', 'image/jpeg')),
+    file_name VARCHAR(255) NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    note VARCHAR(1000),
+    status VARCHAR(20) NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'moved', 'dismissed')),
+    moved_document_id UUID REFERENCES documents(document_id) ON DELETE SET NULL,
+    handled_by_user_id UUID REFERENCES app_users(user_id),
+    handled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT shared_files_client_fkey FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    CONSTRAINT shared_files_case_fkey FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE SET NULL (case_id),
+    CONSTRAINT shared_files_handled_check CHECK ((status = 'new') = (handled_at IS NULL)),
+    CONSTRAINT shared_files_portal_case_check CHECK (purpose <> 'portal' OR (client_id IS NOT NULL AND message_id IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    subscription_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh VARCHAR(200) NOT NULL,
+    auth VARCHAR(100) NOT NULL,
+    user_agent VARCHAR(300),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_success_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS official_notices (
+    notice_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    client_id UUID NOT NULL,
+    hearing_id UUID REFERENCES hearings(hearing_id) ON DELETE SET NULL,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('hearing', 'judgment', 'other')),
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    sent_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    acknowledged_at TIMESTAMPTZ,
+    CONSTRAINT official_notices_office_key UNIQUE (office_id, notice_id),
+    CONSTRAINT official_notices_case_fkey FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE,
+    CONSTRAINT official_notices_client_fkey FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS notice_deliveries (
+    delivery_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    notice_id UUID NOT NULL,
+    channel VARCHAR(20) NOT NULL CHECK (channel IN ('portal', 'push', 'email', 'whatsapp')),
+    -- prepared: a WhatsApp message ready for the lawyer to send; sent: delivered or handed over;
+    -- failed: could not be sent (detail says why); skipped: the channel was not available.
+    status VARCHAR(20) NOT NULL CHECK (status IN ('prepared', 'sent', 'failed', 'skipped')),
+    detail VARCHAR(300),
+    recorded_by_user_id UUID REFERENCES app_users(user_id),
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (office_id, notice_id) REFERENCES official_notices(office_id, notice_id) ON DELETE CASCADE
+);
+
+-- 15h. Case stage history and fee agreements with installments. See migration 0023.
+CREATE TABLE IF NOT EXISTS case_stage_history (
+    history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    from_stage VARCHAR(20),
+    to_stage VARCHAR(20) NOT NULL,
+    note VARCHAR(1000),
+    changed_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS fee_agreements (
+    agreement_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    client_id UUID NOT NULL,
+    currency CHAR(3) NOT NULL CHECK (currency IN ('ILS', 'JOD', 'USD')),
+    total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount > 0),
+    description VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'settled')),
+    -- A settlement closes what is left: unpaid installments are cancelled and, when the client pays
+    -- an agreed sum instead, one invoice for it is issued.
+    settled_at TIMESTAMPTZ,
+    settlement_amount NUMERIC(12, 2) CHECK (settlement_amount IS NULL OR settlement_amount >= 0),
+    settlement_note VARCHAR(1000),
+    settlement_invoice_id UUID REFERENCES invoices(invoice_id),
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fee_agreements_office_key UNIQUE (office_id, agreement_id),
+    CONSTRAINT fee_agreements_case_fkey FOREIGN KEY (office_id, case_id) REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE,
+    CONSTRAINT fee_agreements_client_fkey FOREIGN KEY (office_id, client_id) REFERENCES clients(office_id, client_id),
+    CONSTRAINT fee_agreements_settled_check CHECK ((status = 'settled') = (settled_at IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS fee_installments (
+    installment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL,
+    agreement_id UUID NOT NULL,
+    sequence SMALLINT NOT NULL CHECK (sequence > 0),
+    due_on DATE NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    invoice_id UUID NOT NULL REFERENCES invoices(invoice_id),
+    CONSTRAINT fee_installments_sequence_key UNIQUE (agreement_id, sequence),
+    FOREIGN KEY (office_id, agreement_id) REFERENCES fee_agreements(office_id, agreement_id) ON DELETE CASCADE
+);
+
+-- 15i. The professional directory and colleague message templates. See migration 0024.
+CREATE TABLE IF NOT EXISTS court_office_notes (
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    court_id UUID NOT NULL REFERENCES courts(court_id) ON DELETE CASCADE,
+    note VARCHAR(1000) NOT NULL,
+    updated_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (office_id, court_id)
+);
+
+CREATE TABLE IF NOT EXISTS colleagues (
+    colleague_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    full_name VARCHAR(150) NOT NULL,
+    bar_number VARCHAR(40),
+    phone VARCHAR(40),
+    email VARCHAR(150),
+    city VARCHAR(80),
+    office_name VARCHAR(150),
+    notes VARCHAR(1000),
+    created_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS colleague_message_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    title VARCHAR(120) NOT NULL,
+    body VARCHAR(3000) NOT NULL,
+    created_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+-- 15j. Sign-in lockouts and the audit log hash chain. See migration 0025.
+CREATE TABLE IF NOT EXISTS sign_in_lockouts (
+    email VARCHAR(255) PRIMARY KEY,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    lock_level INTEGER NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    last_failed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- The hash of one entry: the previous hash and every field of the entry, in a fixed text form.
+CREATE OR REPLACE FUNCTION audit_entry_hash(
+    p_prev CHAR(64), p_seq BIGINT, p_office UUID, p_user UUID, p_action TEXT, p_entity_type TEXT,
+    p_entity UUID, p_details JSONB, p_ip INET, p_created TIMESTAMPTZ
+) RETURNS CHAR(64) AS $$
+    SELECT encode(sha256(convert_to(concat_ws('|',
+        p_prev, p_seq::text, COALESCE(p_office::text, ''), COALESCE(p_user::text, ''), p_action, p_entity_type,
+        COALESCE(p_entity::text, ''), COALESCE(p_details::text, 'null'), COALESCE(host(p_ip), ''),
+        to_char(p_created AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')
+    ), 'UTF8')), 'hex');
+$$ LANGUAGE sql IMMUTABLE;
+
+-- Every new entry joins its office's chain (the platform's entries, without an office, form one
+-- chain of their own). The lock keeps two writers of the same office from taking the same place.
+CREATE OR REPLACE FUNCTION audit_logs_chain() RETURNS trigger AS $$
+DECLARE
+    previous RECORD;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('audit_logs:' || COALESCE(NEW.office_id::text, 'platform'), 0));
+    SELECT chain_seq, entry_hash INTO previous
+      FROM audit_logs
+     WHERE office_id IS NOT DISTINCT FROM NEW.office_id AND chain_seq IS NOT NULL
+     ORDER BY chain_seq DESC
+     LIMIT 1;
+    NEW.created_at := COALESCE(NEW.created_at, NOW());
+    NEW.chain_seq := COALESCE(previous.chain_seq, 0) + 1;
+    NEW.prev_hash := COALESCE(previous.entry_hash, repeat('0', 64));
+    NEW.entry_hash := audit_entry_hash(NEW.prev_hash, NEW.chain_seq, NEW.office_id, NEW.user_id, NEW.action,
+        NEW.entity_type, NEW.entity_id, NEW.details, NEW.ip_address, NEW.created_at);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_logs_chain ON audit_logs;
+CREATE TRIGGER audit_logs_chain BEFORE INSERT ON audit_logs
+    FOR EACH ROW EXECUTE FUNCTION audit_logs_chain();
+
+CREATE OR REPLACE FUNCTION audit_logs_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_logs is append-only' USING ERRCODE = 'insufficient_privilege';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_logs_no_change ON audit_logs;
+CREATE TRIGGER audit_logs_no_change BEFORE UPDATE OR DELETE ON audit_logs
+    FOR EACH ROW EXECUTE FUNCTION audit_logs_append_only();
+
 -- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
@@ -934,3 +1440,45 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_office_dates ON leave_requests(off
 CREATE INDEX IF NOT EXISTS idx_consultation_requests_office ON consultation_requests(office_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_consultation_requests_assignee ON consultation_requests(assigned_to_user_id)
     WHERE assigned_to_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_legal_laws_search ON legal_laws USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_legal_laws_browse ON legal_laws(jurisdiction, law_year DESC);
+CREATE INDEX IF NOT EXISTS idx_legal_laws_gazette ON legal_laws(gazette_issue_id) WHERE gazette_issue_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_legal_articles_search ON legal_articles USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_legal_articles_law_position ON legal_articles(law_id, position);
+CREATE INDEX IF NOT EXISTS idx_legal_rulings_search ON legal_rulings USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_legal_rulings_browse ON legal_rulings(jurisdiction, decided_on DESC);
+CREATE INDEX IF NOT EXISTS idx_legal_ruling_articles_article ON legal_ruling_articles(article_id);
+CREATE INDEX IF NOT EXISTS idx_gazette_issues_published ON gazette_issues(published_on DESC);
+CREATE INDEX IF NOT EXISTS idx_office_library_items_office ON office_library_items(office_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_office_legal_principles_office ON office_legal_principles(office_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_legal_references_case ON case_legal_references(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_ai_analyses_case ON case_ai_analyses(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_ai_analyses_office_month ON case_ai_analyses(office_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_interactions_office_created ON ai_interactions(office_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_document_templates_office ON document_templates(office_id, kind) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_case_drafts_case ON case_drafts(case_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_drafts_office_source ON case_drafts(office_id, created_at) WHERE source = 'ai';
+CREATE INDEX IF NOT EXISTS idx_issued_documents_office ON issued_documents(office_id, issued_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issued_documents_draft ON issued_documents(draft_id) WHERE draft_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_clips_message ON voice_clips(message_id) WHERE message_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_clips_note ON voice_clips(note_id) WHERE note_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_voice_clips_unattached ON voice_clips(office_id, created_at)
+    WHERE message_id IS NULL AND note_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_shared_files_case_new ON shared_files(case_id, created_at DESC) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shared_files_client ON shared_files(client_id, created_at DESC) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shared_files_message ON shared_files(message_id) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shared_files_unattached ON shared_files(office_id, created_at)
+    WHERE purpose = 'message' AND message_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_official_notices_case ON official_notices(case_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_official_notices_client ON official_notices(client_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notice_deliveries_notice ON notice_deliveries(notice_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_case_stage_history_case ON case_stage_history(case_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_agreements_case ON fee_agreements(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_agreements_client ON fee_agreements(client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fee_installments_agreement ON fee_installments(agreement_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_fee_installments_invoice ON fee_installments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_courts_city ON courts(city, name);
+CREATE INDEX IF NOT EXISTS idx_colleagues_office ON colleagues(office_id, full_name);
+CREATE INDEX IF NOT EXISTS idx_colleague_templates_office ON colleague_message_templates(office_id, title);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_chain ON audit_logs(office_id, chain_seq) WHERE chain_seq IS NOT NULL;

@@ -57,7 +57,10 @@ test('each kind is asked with exactly the values its query uses', async () => {
   const { calls, query } = fakeDatabase();
   await runReminders({ now: MORNING, query, env, channels: [] });
   const byKind = Object.fromEntries(calls.filter(({ sql }) => /AS kind/.test(sql)).map(({ sql, values }) => [/SELECT '(\w+)' AS kind/.exec(sql)[1], { sql, values }]));
-  assert.deepEqual(Object.keys(byKind), ['hearing', 'task', 'appointment', 'poa']);
+  assert.deepEqual(Object.keys(byKind), ['hearing', 'task', 'appointment', 'poa', 'installment']);
+  assert.deepEqual(byKind.installment.values, ['2026-11-27', '2026-11-28']);
+  assert.match(byKind.installment.sql, /i\.status IN \('unpaid', 'partially_paid'\)/, 'only installments still owed');
+  assert.match(byKind.installment.sql, /a\.status = 'active'/, 'not settled agreements');
   assert.deepEqual(byKind.hearing.values, ['Asia/Hebron', '2026-11-27', '2026-11-28', MORNING.toISOString()]);
   assert.deepEqual(byKind.task.values, ['Asia/Hebron', '2026-11-28']);
   assert.deepEqual(byKind.appointment.values, ['Asia/Hebron', '2026-11-27', MORNING.toISOString()]);
@@ -91,7 +94,8 @@ test('a claimed reminder goes in-app and by email; nobody gets it twice', async 
   assert.match(mails[0].subject, /تذكير: جلسة غداً/);
   const inApp = calls.filter(({ sql }) => sql.includes('INSERT INTO notifications'));
   assert.equal(inApp.length, 1);
-  assert.deepEqual(inApp[0].values.slice(2), [userId, officeId]);
+  // tapping it in the app opens the case on its hearings
+  assert.deepEqual(inApp[0].values.slice(2), [userId, officeId, `/office/cases/${caseId}?tab=hearings`]);
   const claim = calls.find(({ sql }) => sql.includes('INSERT INTO reminder_deliveries'));
   assert.match(claim.sql, /ON CONFLICT DO NOTHING/);
   assert.ok(calls.findIndex(({ sql }) => sql.includes('INSERT INTO reminder_deliveries'))
@@ -138,6 +142,9 @@ test('reminders name the case and the local time, never the details of the work'
   assert.match(poa.body, /خلال 7 يوماً/);
   const task = reminderMessage({ ...HEARING_ROW, kind: 'task', detail: null }, 'Asia/Hebron');
   assert.doesNotMatch(task.body, /مرافعة/);
+  // 23:30 UTC is already the next day in Palestine: the calendar opens on the local day
+  const appointment = reminderMessage({ ...HEARING_ROW, kind: 'appointment', detail: 'meeting', at: new Date('2026-11-27T23:30:00Z') }, 'Asia/Hebron');
+  assert.equal(appointment.path, '/office/calendar?day=2026-11-28');
 });
 
 /* ───────────── the person's own preference ───────────── */

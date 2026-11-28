@@ -8,7 +8,7 @@ import { hasOfficeContext } from './officeScope.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const INVITABLE_ROLES = new Set(['lawyer', 'assistant', 'client']);
+const INVITABLE_ROLES = new Set(['lawyer', 'assistant', 'client', 'accountant', 'data_entry', 'print_only']);
 const INVITATION_TTL_DAYS = 7;
 const INVITATION_FIELDS = new Set(['email', 'role', 'client_id']);
 const ACCEPT_FIELDS = new Set(['bar_number', 'specialty', 'years_experience']);
@@ -89,7 +89,7 @@ export async function createInvitation(actor, body) {
     invalid('Request contains unsupported fields.');
   }
   const email = normalizeEmail(body.email);
-  if (!INVITABLE_ROLES.has(body.role)) invalid('role must be lawyer, assistant, or client.');
+  if (!INVITABLE_ROLES.has(body.role)) invalid('role must be lawyer, assistant, accountant, data_entry, print_only or client.');
   const clientId = body.client_id ?? null;
   // A client is invited from their record on the clients page, so the account is always tied to it.
   if (body.role === 'client' && clientId === null) invalid('client_id is required for the client role.');

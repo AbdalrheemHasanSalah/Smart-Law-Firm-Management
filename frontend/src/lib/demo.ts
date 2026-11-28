@@ -30,6 +30,14 @@ import type { CourtNotice, DeliveryStatus, NoticeType } from './courtNotices'
 import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseCategory, FinanceAccount, LedgerEntry } from './officeFinance'
 import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './hr'
 import type { Consultation, PageSettings } from './publicPage'
+import { libraryRoutes } from './demoLibrary'
+import { analysisRoutes } from './demoAnalysis'
+import { demoVerification, draftingRoutes } from './demoDrafting'
+import { demoAttachment, portalRoutes } from './demoPortal'
+import { workflowRoutes } from './demoWorkflow'
+import { directoryRoutes } from './demoDirectory'
+import { gate, lockedUntil, permissionsOf, securityRoutes, signInFailed, signInSucceeded } from './demoSecurity'
+import type { Permission } from './permissionRules'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -37,6 +45,7 @@ export const DEMO_ACCOUNTS = {
   staff: 'lawyer@demo.ps',
   client: 'client@demo.ps',
   platform: 'admin@demo.ps',
+  accountant: 'accountant@demo.ps',
 } as const
 
 const OFFICE = 'o-1'
@@ -56,12 +65,16 @@ type DemoUser = {
   role: OfficeRole | null
   is_owner: boolean
   client_id?: string
+  granted?: Permission[]
+  revoked?: Permission[]
 }
 
 const users: DemoUser[] = [
   { user_id: 'u-owner', full_name: 'سامر الخطيب', email: DEMO_ACCOUNTS.owner, status: 'active', is_platform_admin: false, role: 'admin', is_owner: true },
   { user_id: 'u-lawyer', full_name: 'ليان عودة', email: DEMO_ACCOUNTS.staff, status: 'active', is_platform_admin: false, role: 'lawyer', is_owner: false },
   { user_id: 'u-assistant', full_name: 'رنا حمدان', email: 'assistant@demo.ps', status: 'active', is_platform_admin: false, role: 'assistant', is_owner: false },
+  { user_id: 'u-accountant', full_name: 'وسيم البرغوثي', email: DEMO_ACCOUNTS.accountant, status: 'active', is_platform_admin: false, role: 'accountant', is_owner: false },
+  { user_id: 'u-entry', full_name: 'دانة عيسى', email: 'entry@demo.ps', status: 'active', is_platform_admin: false, role: 'data_entry', is_owner: false },
   { user_id: 'u-client', full_name: 'محمود النجار', email: DEMO_ACCOUNTS.client, status: 'active', is_platform_admin: false, role: 'client', is_owner: false, client_id: 'c-1' },
   { user_id: 'u-platform', full_name: 'مدير المنصّة', email: DEMO_ACCOUNTS.platform, status: 'active', is_platform_admin: true, role: null, is_owner: false },
 ]
@@ -156,15 +169,15 @@ const messages: Message[] = [
 type DemoNotification = NotificationItem & { user_id: string }
 const reminderEmailsOff = new Set<string>()
 const notifications: DemoNotification[] = [
-  { notification_id: 'nt-r1', user_id: 'u-owner', title: 'توكيل ينتهي قريباً', body: 'ينتهي التوكيل رقم و-2026/0412 خلال 18 يوماً. جدّده أو استبدله حتى لا تبقى قضاياه دون توكيل ساري.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(30) },
-  { notification_id: 'nt-r2', user_id: 'u-lawyer', title: 'تذكير: جلسة غداً', body: 'لديك جلسة سماع شهود في القضية 2026/114 غداً الساعة 9:00 ص.', notification_type: 'reminder', read_at: null, created_at: minutesAgo(45) },
-  { notification_id: 'nt-1', user_id: 'u-owner', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(95) },
-  { notification_id: 'nt-2', user_id: 'u-owner', title: 'أُنجزت مهمة', body: 'أنجز أحد أعضاء المكتب مهمة مسندة إليه.', notification_type: 'task', read_at: null, created_at: minutesAgo(400) },
-  { notification_id: 'nt-3', user_id: 'u-owner', title: 'ملاحظة جديدة على قضية', body: 'أُضيفت ملاحظة جديدة على القضية رقم 2026/114.', notification_type: 'case_note', read_at: minutesAgo(900), created_at: minutesAgo(1500) },
-  { notification_id: 'nt-4', user_id: 'u-lawyer', title: 'مهمة جديدة لك', body: 'أُسندت إليك مهمة جديدة في المكتب.', notification_type: 'task', read_at: null, created_at: minutesAgo(120) },
-  { notification_id: 'nt-5', user_id: 'u-lawyer', title: 'أُسندت إليك قضية', body: 'أُسندت إليك القضية رقم 2026/167.', notification_type: 'case_assignment', read_at: minutesAgo(2000), created_at: minutesAgo(3000) },
-  { notification_id: 'nt-6', user_id: 'u-client', title: 'تحديث جديد على قضيتك', body: 'كتب مكتبك تحديثاً جديداً على قضيتك رقم 2026/114.', notification_type: 'case_note', read_at: null, created_at: minutesAgo(60) },
-  { notification_id: 'nt-7', user_id: 'u-client', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', read_at: null, created_at: minutesAgo(40) },
+  { notification_id: 'nt-r1', user_id: 'u-owner', title: 'توكيل ينتهي قريباً', body: 'ينتهي التوكيل رقم و-2026/0412 خلال 18 يوماً. جدّده أو استبدله حتى لا تبقى قضاياه دون توكيل ساري.', notification_type: 'reminder', link_path: '/office/powers-of-attorney?state=expiring', read_at: null, created_at: minutesAgo(30) },
+  { notification_id: 'nt-r2', user_id: 'u-lawyer', title: 'تذكير: جلسة غداً', body: 'لديك جلسة سماع شهود في القضية 2026/114 غداً الساعة 9:00 ص.', notification_type: 'reminder', link_path: '/office/cases/k-1?tab=hearings', read_at: null, created_at: minutesAgo(45) },
+  { notification_id: 'nt-1', user_id: 'u-owner', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', link_path: '/office/messages?with=u-lawyer', read_at: null, created_at: minutesAgo(95) },
+  { notification_id: 'nt-2', user_id: 'u-owner', title: 'أُنجزت مهمة', body: 'أنجز أحد أعضاء المكتب مهمة مسندة إليه.', notification_type: 'task', link_path: '/office/tasks', read_at: null, created_at: minutesAgo(400) },
+  { notification_id: 'nt-3', user_id: 'u-owner', title: 'ملاحظة جديدة على قضية', body: 'أُضيفت ملاحظة جديدة على القضية رقم 2026/114.', notification_type: 'case_note', link_path: '/office/cases/k-1?tab=notes', read_at: minutesAgo(900), created_at: minutesAgo(1500) },
+  { notification_id: 'nt-4', user_id: 'u-lawyer', title: 'مهمة جديدة لك', body: 'أُسندت إليك مهمة جديدة في المكتب.', notification_type: 'task', link_path: '/office/tasks', read_at: null, created_at: minutesAgo(120) },
+  { notification_id: 'nt-5', user_id: 'u-lawyer', title: 'أُسندت إليك قضية', body: 'أُسندت إليك القضية رقم 2026/167.', notification_type: 'case_assignment', link_path: '/office/cases/k-4', read_at: minutesAgo(2000), created_at: minutesAgo(3000) },
+  { notification_id: 'nt-6', user_id: 'u-client', title: 'تحديث جديد على قضيتك', body: 'كتب مكتبك تحديثاً جديداً على قضيتك رقم 2026/114.', notification_type: 'case_note', link_path: '/portal#case-k-1', read_at: null, created_at: minutesAgo(60) },
+  { notification_id: 'nt-7', user_id: 'u-client', title: 'رسالة جديدة', body: 'وصلتك رسالة جديدة من ليان عودة.', notification_type: 'message', link_path: '/portal/messages?with=u-lawyer', read_at: null, created_at: minutesAgo(40) },
 ]
 
 platformOffices.push(
@@ -217,7 +230,7 @@ const recordPayment = (officeId: string, amount: number, months: number, method:
   const payment: DemoPayment = { payment_id: uid('sp'), office_id: officeId, amount, currency: PLAN.currency, months, method, status: 'paid', reference, period_start: start.toISOString(), period_end: end.toISOString(), created_at: new Date().toISOString(), paid_at: new Date().toISOString(), recorded_by_name: recorder }
   subscriptionPayments.unshift(payment)
   if (officeId === OFFICE) {
-    notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', read_at: null, created_at: payment.created_at })
+    notifications.push({ notification_id: uid('nt'), user_id: 'u-owner', title: 'سُجّلت دفعة اشتراك', body: `سُجّلت دفعة اشتراك لمكتبك، والاشتراك فعّال حتى ${new Intl.DateTimeFormat('ar-PS-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(end)}.`, notification_type: 'subscription', link_path: '/office/subscription', read_at: null, created_at: payment.created_at })
   }
   return payment
 }
@@ -434,7 +447,7 @@ const currentUser = () => users.find((user) => user.user_id === sessionStorage.g
 
 const membershipOf = (user: DemoUser): Membership[] =>
   user.role
-    ? [{ office_id: OFFICE, office_name: 'مكتب الخطيب للمحاماة', office_status: 'active', office_city: 'نابلس', role: user.role, membership_status: 'active', is_owner: user.is_owner }]
+    ? [{ office_id: OFFICE, office_name: 'مكتب الخطيب للمحاماة', office_status: 'active', office_city: 'نابلس', role: user.role, membership_status: 'active', is_owner: user.is_owner, permissions: permissionsOf(user) }]
     : []
 
 const sessionOf = (user: DemoUser): Session => {
@@ -466,6 +479,9 @@ const decode = (value: unknown, fallback: string) => {
     return fallback
   }
 }
+/** A demo recording's id carries its length ("vc-ab12cd3-14"), as the demo has no clip store. */
+const demoVoice = (clipId: unknown) =>
+  typeof clipId === 'string' && clipId.startsWith('vc-') ? { clip_id: clipId, duration_seconds: Number(clipId.split('-')[2]) || 1 } : null
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 
 /** Adds a client to the demo office, from the same fields the real backend accepts. */
@@ -584,7 +600,7 @@ const routes: Route[] = [
   }],
   ['post', /^\/cases\/([^/]+)\/notes$/, STAFF, ({ user, params, body }) => {
     const row = caseFor(user, params[0]!)
-    const note: CaseNote = { note_id: uid('n'), case_id: row.case_id, body: String(body.body), visibility: (body.visibility as CaseNote['visibility']) ?? 'case_team', created_at: new Date().toISOString(), updated_at: null }
+    const note: CaseNote = { note_id: uid('n'), case_id: row.case_id, body: String(body.body ?? ''), voice: demoVoice(body.voice_clip_id), visibility: (body.visibility as CaseNote['visibility']) ?? 'case_team', created_at: new Date().toISOString(), updated_at: null }
     notes.push(note)
     return { note }
   }],
@@ -1231,6 +1247,18 @@ const routes: Route[] = [
     return { checkout_url: `${location.origin}/office/subscription?payment=success` }
   }],
 
+  // platform: opened requests
+  ['post', /^\/platform\/offices\/seen$/, ['platform'], () => {
+    const now = new Date().toISOString()
+    for (const office of platformOffices) if (office.status === 'pending' && !office.platform_seen_at) office.platform_seen_at = now
+    return { updated: 1 }
+  }],
+  ['post', /^\/platform\/offices\/([^/]+)\/seen$/, ['platform'], ({ params }) => {
+    const office = platformOffices.find((entry) => entry.office_id === params[0])
+    if (office && !office.platform_seen_at) office.platform_seen_at = new Date().toISOString()
+    return { updated: office ? 1 : 0 }
+  }],
+
   // platform
   ['get', /^\/platform\/offices$/, ['platform'], () => ({ offices: platformOffices })],
   ['patch', /^\/platform\/offices\/([^/]+)$/, ['platform'], ({ params, body }) => {
@@ -1255,6 +1283,16 @@ const routes: Route[] = [
   ['get', /^\/notifications$/, ALL, ({ user }) => {
     const mine = notifications.filter((entry) => entry.user_id === user.user_id).sort((a, b) => b.created_at.localeCompare(a.created_at))
     return { notifications: mine, unread: mine.filter((entry) => !entry.read_at).length }
+  }],
+  ['delete', /^\/notifications$/, ALL, ({ user }) => {
+    const before = notifications.length
+    for (let index = notifications.length - 1; index >= 0; index -= 1) if (notifications[index]!.user_id === user.user_id) notifications.splice(index, 1)
+    return { deleted: before - notifications.length }
+  }],
+  ['post', /^\/notifications\/([^/]+)\/read$/, ALL, ({ user, params }) => {
+    const entry = notifications.find((row) => row.notification_id === params[0] && row.user_id === user.user_id)
+    if (entry && !entry.read_at) entry.read_at = new Date().toISOString()
+    return { updated: entry ? 1 : 0 }
   }],
   ['post', /^\/notifications\/read$/, ALL, ({ user }) => {
     const now = new Date().toISOString()
@@ -1284,16 +1322,65 @@ const routes: Route[] = [
   }],
   ['post', /^\/messages\/([^/]+)$/, ALL, ({ user, params, body }) => {
     const contact = contactFor(user, params[0]!)
-    const message: Message = { message_id: uid('m'), body: String(body.body).trim(), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
+    const message: Message = { message_id: uid('m'), body: String(body.body ?? '').trim(), voice: demoVoice(body.voice_clip_id), attachment: demoAttachment(body.attachment_file_id), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
     messages.push(message)
     notifications.push({ notification_id: uid('nt'), user_id: contact.user_id, title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${user.full_name}.`, notification_type: 'message', read_at: null, created_at: message.sent_at })
     return { message }
   }],
+  // legal library (fictional sample texts)
+  ...(libraryRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // case analysis tools (fixed sample results, no model)
+  ...(analysisRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // drafting, letterhead and print codes
+  ...(draftingRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // client files, chat attachments and official notices
+  ...(portalRoutes({
+    fail,
+    uid,
+    caseFor: caseFor as unknown as (user: never, caseId: string) => { case_id: string; case_number: string; title: string },
+    clientsOfCase: (caseId) =>
+      involves
+        .filter((link) => link.case_id === caseId)
+        .map((link) => ({
+          client_id: link.client_id,
+          full_name_or_org: clients.find((client) => client.client_id === link.client_id)?.full_name_or_org ?? '',
+          user_id: users.find((user) => user.client_id === link.client_id)?.user_id ?? null,
+        })),
+  }) as Route[]),
+  // courts, colleagues and message templates
+  ...(directoryRoutes({ fail, uid }) as Route[]),
+  // security page, audit chain check, office export and backups
+  ...(securityRoutes({
+    fail,
+    members: () => users,
+    officeName: 'مكتب الخطيب للمحاماة',
+    officeData: () => ({ clients, legal_cases: cases, involves, assigned_to: assignments, tasks, case_notes: notes, documents, contracts, hearings, messages }),
+  }) as Route[]),
+  // case stages, fee agreements and the client briefcase
+  ...(workflowRoutes({
+    fail,
+    uid,
+    caseFor: caseFor as never,
+    visibleCases: visibleCases as never,
+    clientsOfCase: (caseId) =>
+      involves
+        .filter((link) => link.case_id === caseId)
+        .map((link) => ({ client_id: link.client_id, full_name_or_org: clients.find((client) => client.client_id === link.client_id)?.full_name_or_org ?? '' })),
+    clientById: (clientId) => clients.find((client) => client.client_id === clientId),
+    casesOfClient: (clientId) => involves.filter((link) => link.client_id === clientId).map((link) => link.case_id),
+    clientUserId: (clientId) => users.find((user) => user.client_id === clientId)?.user_id ?? null,
+    thread: (userId, otherId) =>
+      messages.filter((message) => (message.sender_user_id === userId && message.receiver_user_id === otherId) || (message.sender_user_id === otherId && message.receiver_user_id === userId)),
+    documentsOfClient: (clientId, caseIds) =>
+      documents.filter((document) => document.client_id === clientId && caseIds.includes(document.case_id)).map(({ document_id, file_name, document_type, created_at, case_id }) => ({ document_id, file_name, document_type: document_type ?? '', created_at, case_id })),
+    nextHearing: (caseId) =>
+      hearings.filter((entry) => entry.case_id === caseId && entry.status === 'scheduled' && entry.hearing_at > new Date().toISOString()).map((entry) => entry.hearing_at).sort()[0] ?? null,
+  }) as Route[]),
 ]
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {
   owner: (user) => user.is_owner || user.is_platform_admin || !user.role,
-  staff: (user) => user.role === 'lawyer' || user.role === 'assistant',
+  staff: (user) => user.role !== null && ['lawyer', 'assistant', 'accountant', 'data_entry', 'print_only'].includes(user.role),
   client: (user) => user.role === 'client',
 }
 
@@ -1304,8 +1391,15 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
   const headers = (config.headers?.toJSON?.() ?? {}) as Record<string, unknown>
 
   if (method === 'post' && path === '/auth/sign-in/email') {
-    const user = users.find((entry) => entry.email === String(body.email).trim().toLowerCase())
-    if (!user || body.password !== DEMO_PASSWORD) throw fail(401, 'INVALID_CREDENTIALS')
+    const email = String(body.email).trim().toLowerCase()
+    const until = lockedUntil(email)
+    if (until) throw fail(429, 'ACCOUNT_LOCKED', { locked_until: until })
+    const user = users.find((entry) => entry.email === email)
+    if (!user || body.password !== DEMO_PASSWORD) {
+      signInFailed(email)
+      throw fail(401, 'INVALID_CREDENTIALS')
+    }
+    signInSucceeded(email)
     if (user.status !== 'active') throw fail(403, 'ACCOUNT_INACTIVE')
     const portal = headers['X-Qadiyati-Portal']
     if (typeof portal === 'string' && !PORTAL_ROLES[portal]?.(user)) {
@@ -1340,9 +1434,13 @@ const handle = (config: InternalAxiosRequestConfig): unknown => {
       return { received: true }
     }
   }
-  const user = currentUser()
-  if (!user) throw fail(401, 'UNAUTHORIZED')
+  const verifyPath = /^\/public\/verify\/([^/]+)$/.exec(path)
+  if (verifyPath && method === 'get') return demoVerification(decodeURIComponent(verifyPath[1]!))
+  const signedIn = currentUser()
+  if (!signedIn) throw fail(401, 'UNAUTHORIZED')
   if (method === 'post' && invitePath) throw fail(403, 'INVITATION_EMAIL_MISMATCH')
+  // The server's permission gate: new roles act as the admin where their permissions allow.
+  const user = gate(signedIn, method, path, fail)
   for (const [routeMethod, pattern, roles, handler] of routes) {
     const match = routeMethod === method ? pattern.exec(path) : null
     if (!match) continue
@@ -1361,7 +1459,14 @@ export const demoAdapter: AxiosAdapter = (config) =>
       try {
         // Serialised, as over a network: the app must never hold references into the demo store,
         // or in-place updates here would change its cache without React noticing.
-        resolve(respond(200, JSON.parse(JSON.stringify(handle(config) ?? null))))
+        const failed = (error: unknown) =>
+          error instanceof Reply
+            ? reject(new AxiosError('Demo request failed', 'ERR_BAD_REQUEST', config, null, respond(error.status, error.body) as never))
+            : reject(new AxiosError(String(error), 'ERR_BAD_RESPONSE', config, null, respond(500, { code: 'SERVER' }) as never))
+        // A few handlers are async (hashing with WebCrypto); the rest answer at once.
+        Promise.resolve(handle(config))
+          .then((result) => resolve(respond(200, JSON.parse(JSON.stringify(result ?? null)))))
+          .catch(failed)
       } catch (error) {
         if (error instanceof Reply) {
           reject(new AxiosError('Demo request failed', 'ERR_BAD_REQUEST', config, null, respond(error.status, error.body) as never))

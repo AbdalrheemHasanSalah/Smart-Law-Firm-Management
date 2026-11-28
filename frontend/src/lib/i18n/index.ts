@@ -20,11 +20,63 @@ const ARABIC = /[؀-ۿ]/
 
 const n = (value: string) => (value === '1' ? '' : 's')
 
+/** One part of the analysis redaction note: "اسمان" → "2 names", "3 هواتف" → "3 phones". */
+const REDACTED_ONE: Record<string, string> = {
+  'اسم واحد': '1 name', اسمان: '2 names', 'رقم هوية واحد': '1 ID number', 'رقما هوية': '2 ID numbers',
+  'هاتف واحد': '1 phone', هاتفان: '2 phones', 'بريد واحد': '1 email', بريدان: '2 emails',
+}
+const REDACTED_MANY: [RegExp, string][] = [
+  [/^(\d+) (?:أسماء|اسماً)$/, 'names'],
+  [/^(\d+) (?:أرقام هويات|رقم هوية)$/, 'ID numbers'],
+  [/^(\d+) (?:هواتف|هاتفاً)$/, 'phones'],
+  [/^(\d+) (?:عناوين بريد|عنوان بريد)$/, 'emails'],
+]
+function redactedPart(part: string) {
+  if (REDACTED_ONE[part]) return REDACTED_ONE[part]
+  for (const [pattern, noun] of REDACTED_MANY) {
+    const match = part.match(pattern)
+    if (match) return `${match[1]} ${noun}`
+  }
+  return part
+}
+
 /** Texts built from variables: [Arabic pattern, English]. Checked when no exact entry matches. */
 const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
+  // Before the general "X من Y" patterns below.
+  [/^الدخول موقوف حتى (.+)$/, 'Sign-in locked until $1'],
+  [/^صلاحيات (.+)$/, (_, name) => `Permissions of ${name}`],
+  [/^(.+) — (مسحوبة من دوره|مضافة له|من دوره)$/, (_, note, kind) => `${translate(note)} — ${kind === 'مسحوبة من دوره' ? 'removed from the role' : kind === 'مضافة له' ? 'added for this member' : 'from the role'}`],
+  [/^القيود المفحوصة: (\d+)( · قيود أقدم من السلسلة لا يمكن فحصها: (\d+))? · (.+)$/, (_, checked, _legacy, legacy, when) => `Entries checked: ${checked}${legacy ? ` · older entries outside the chain that cannot be checked: ${legacy}` : ''} · ${translate(when)}`],
+  [/^آخر قيد: رقم (\d+) · البصمة$/, 'Last entry: no. $1 · fingerprint'],
+  [/^القيد رقم (\d+) \((.+)\): (.+)$/, (_, seq, when, what) => `Entry no. ${seq} (${translate(when)}): ${translate(what)}`],
+  [/^نُزّلت نسخة فُحصت قبل تسليمها — عدد الجداول: (\d+)، وعدد السجلات: (\d+)\. البصمة$/, 'Downloaded a copy that was checked before hand-over — tables: $1, records: $2. Fingerprint'],
+  [/^الملف سليم ومطابق لبصمته: نسخة (.+) بتاريخ (.+)\.$/, (_, office, when) => `The file is intact and matches its fingerprint: the copy of ${office} from ${translate(when)}.`],
+  [/^آخر نسخة سليمة: (.+?)( — مضى عليها أكثر من 36 ساعة، افحص الخادم\.|\.)$/, (_, when, rest) => `Last good backup: ${translate(when)}${rest === '.' ? '.' : ' — more than 36 hours ago, check the server.'}`],
+  [/^(.+) · الجداول: (\d+)$/, '$1 · tables: $2'],
+  [/^(.+) · الملفات: (\d+)$/, '$1 · files: $2'],
+  [/^رسالة إلى (.+)$/, (_, name) => `Message to ${name}`],
+  [/^حذف (.+) من دليل المكتب؟$/, 'Remove $1 from the office directory?'],
+  [/^حذف القالب «(.+)»؟$/, 'Delete the template “$1”?'],
+  [/^المادة 152\(1\): (\d+) ديناراً × ([\d.]+)% عجز دائم\.$/, 'Art. 152(1): $1 dinars × $2% permanent disability.'],
+  [/^المادة 152\(2\): (\d+) ديناراً × عدد الليالي \((\d+)\)\.$/, 'Art. 152(2): $1 dinars × number of nights ($2).'],
+  [/^المادة 152\(3\): (\d+) دينار عن العملية أو العمليات التي استلزمت المكوث في المشفى\.$/, 'Art. 152(3): $1 dinars for the surgery or surgeries that required a hospital stay.'],
+  [/^المادة 152\(4\): تعويض لا يزيد عن (\d+) دينار، تقدّره المحكمة\.$/, 'Art. 152(4): compensation of up to $1 dinars, set by the court.'],
+  [/^المادة 153: لا يزيد مجموع الضرر المعنوي عن ([\d,]+) دينار\.$/, 'Art. 153: total non-material damages may not exceed $1 dinars.'],
+  [/^المادة 154: خمسون بالمائة من سقف المادة 153 \(([\d,]+) دينار\) مطروحاً منه حصة الورثة المعالين \(([\d.]+)%\) وفق حجة حصر الإرث\.$/, 'Art. 154: fifty percent of the art. 153 ceiling ($1 dinars), less the dependent heirs’ share ($2%) under the inheritance certificate.'],
+  [/^المادة 156: 100% من الأجر اليومي × عدد الأيام \((\d+)\)( \(بلغت حدّ السنتين من تاريخ الحادث\))?\. الأجر اليومي = الشهري ÷ (\d+) \(عُرف، لا نص\)\.$/, (_, days, capped, divisor) => `Art. 156: 100% of the daily wage × number of days (${days})${capped ? ' (the two-year limit from the accident was reached)' : ''}. Daily wage = monthly ÷ ${divisor} (practice, not the text of the law).`],
+  [/^الأجر بعد سقف المادة 155 × ([\d.]+)% × 12 شهراً × عدد السنوات \(([\d.]+)\)، ناقص ([\d.]+)% مقابل الدفع الفوري \(المادة 157\)\. عدد السنوات ونسبة الخصم يحددهما المحامي بحسب العمل القضائي؛ القانون لا يضع لهما معادلة\.$/, 'Wage after the art. 155 cap × $1% × 12 months × number of years ($2), less $3% for immediate payment (art. 157). The lawyer sets the years and the discount from case law; the law gives no formula for them.'],
+  [/^قسط (\d+) من (\d+) — (.+)$/, 'Installment $1 of $2 — $3'],
+  [/^(انقل القضية|نقل القضية) إلى مرحلة (.+)$/, (_, verb, stage) => `${verb === 'انقل القضية' ? 'Move' : 'Moving'} the case to the ${translate(stage)} stage`],
+  [/^(\d+) أقساط متأخرة$/, '$1 overdue installments'],
+  [/^(.+) ←$/, '$1 →'],
+  [/^استُعمل هذا الشهر (\d+) من (\d+)$/, 'Used this month: $1 of $2'],
   [/^(\d+) طلبات جديدة بانتظار قرارك$/, '$1 new requests awaiting your decision'],
   [/^طلب جديد واحد بانتظار قرارك$/, 'One new request awaiting your decision'],
   [/^طلبان جديدان بانتظار قرارك$/, 'Two new requests awaiting your decision'],
+  [/^(\d+) طلبات جديدة لم تفتحها بعد$/, "$1 new requests you haven't opened yet"],
+  [/^لا طلبات جديدة · (.+) بانتظار قرارك$/, (_, a) => `No new requests · ${a === 'طلب واحد' ? 'one request' : a === 'طلبان' ? 'two requests' : a.replace(/^(\d+) طلبات$/, '$1 requests')} awaiting your decision`],
+  [/^الإشعارات: (\d+) جديدة$/, 'Notifications: $1 new'],
+  [/^«(.+)» يريد الاشتراك في قضيتي\.$/, '“$1” wants to join Qadiyati.'],
   [/^لديك (\d+) مهام مفتوحة، منها (\d+) متأخرة، و(\d+) قضايا قيد العمل\.$/, (_, a, b, c) => `You have ${a} open task${n(a)}, ${b} overdue, and ${c} active case${n(c)}.`],
   [/^لديك (\d+) مهام مفتوحة، و(\d+) قضايا قيد العمل\.$/, (_, a, c) => `You have ${a} open task${n(a)} and ${c} active case${n(c)}.`],
   [/^(\d+) أشهر$/, (_, a) => `${a} month${n(a)}`],
@@ -155,6 +207,43 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^(\d{1,2}) (كانون الثاني|شباط|آذار|نيسان|أيار|حزيران|تموز|آب|أيلول|تشرين الأول|تشرين الثاني|كانون الأول) (\d{4})$/, (_, day, month, year) => `${day} ${MONTHS[month]} ${year}`],
   [/^(.+) — (.+)$/, (_, a, b) => `${translate(a)} — ${translate(b)}`],
   [/^(.+)، (.+)$/, (_, a, b) => `${translate(a)}, ${translate(b)}`],
+  // Legal library: citations, counts and article titles built from their parts.
+  [/^(?:(قانون|قرار بقانون|نظام|مرسوم|قرار|أمر|تشريع) )?رقم (\S+)(?: لسنة (\d{4}))?$/, (_, kind, number, year) =>
+    [kind ? translate(kind) : null, `No. ${number}`, year ? `of ${year}` : null].filter(Boolean).join(' ')],
+  [/^(?:(قانون|قرار بقانون|نظام|مرسوم|قرار|أمر|تشريع) )?لسنة (\d{4})$/, (_, kind, year) => [kind ? translate(kind) : null, `of ${year}`].filter(Boolean).join(' ')],
+  [/^المادة (\S+) من$/, 'Article $1 of'],
+  [/^المادة (\S+)$/, 'Article $1'],
+  [/^العدد (\d+)$/, 'Issue $1'],
+  [/^(\d+) (?:مادة|مواد)$/, (_, a) => `${a} article${n(a)}`],
+  [/^مادة واحدة$/, '1 article'],
+  [/^مادتان$/, '2 articles'],
+  [/^أُخفيت مادتان ملغاتان تطابقان البحث\.$/, 'Two repealed articles matching the search were hidden.'],
+  [/^(\d+) (?:بنود|بنداً)$/, (_, a) => `${a} item${n(a)}`],
+  [/^بند واحد$/, '1 item'],
+  [/^بندان$/, '2 items'],
+  [/^أُخفيت (\d+) (?:مواد|مادة) ملغاة تطابق البحث\.$/, '$1 repealed articles matching the search were hidden.'],
+  [/^· (\d+) مادة مخزّنة ليست في الملف بقيت كما هي$/, (_, a) => `· ${a} stored article${n(a)} not in the file kept as they are`],
+  // Case analysis tools.
+  [/^(\d+) بنود غير موثّقة: تحقّق منها قبل الاعتماد عليها\.$/, '$1 unverified points: check them before relying on them.'],
+  [/^· إلى (.+)$/, '· into $1'],
+  [/^اختر: (.+)$/, 'Choose: $1'],
+  [/^تُرسل البيانات إلى (.+) بعد حجب الأسماء والأرقام\.$/, 'Data is sent to $1 after names and numbers are redacted.'],
+  [/^حُجب قبل الإرسال: (.+)\.$/, (_, parts) => `Redacted before sending: ${parts.split('، ').map(redactedPart).join(', ')}.`],
+  // Drafting.
+  [/^بقيت (\d+) فجوات بين أقواس مربعة لتكملها\.$/, '$1 gaps in square brackets are left to fill.'],
+  [/^نموذج المكتب: (.+)$/, 'Office template: $1'],
+  [/^هيكل جاهز: (.+)$/, (_, title) => `Skeleton: ${translate(title)}`],
+  [/^بعد الاعتماد لا يمكن تعديل النص، ويأخذ المستند بصمة ورمز تحقق يُطبع عليه، ويبقى في ملف القضية\.(.*)$/, (_, rest) =>
+    `Once final, the text can no longer change; the document gets a fingerprint and a verification code printed on it, and stays in the case file.${
+      rest ? ` Note: the text still has ${rest.includes('فجوة واحدة') ? 'one gap' : `${rest.match(/\d+/)?.[0] ?? 'some'} gaps`} in square brackets.` : ''}`],
+  // Voice.
+  [/^رسالة صوتية مدتها (\d+:\d{2})$/, 'Voice message, $1 long'],
+  [/^رسالة صوتية \((\d+:\d{2})\) — لا تُشغَّل في وضع التجربة بعد إعادة تحميل الصفحة$/, 'Voice message ($1): in demo mode it no longer plays after the page reloads'],
+  // Client files and notices.
+  [/^(\d+) ملفات تنتظر$/, '$1 files waiting'],
+  [/^إلى (.+)$/, 'To $1'],
+  // Parts joined with " · " (a citation, a date and a name…): each part on its own.
+  [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".
   [/^([^:]+): (.+)$/, (_, a, b) => `${a}: ${translate(b)}`],
 ]

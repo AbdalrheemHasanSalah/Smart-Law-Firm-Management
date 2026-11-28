@@ -11,7 +11,7 @@ import {
   registerOffice,
   selectActiveOffice,
 } from '../services/officeService.js';
-import { listOffices, reviewOffice, updateAccountStatus } from '../services/platformService.js';
+import { listOffices, markOfficesSeen, reviewOffice, updateAccountStatus } from '../services/platformService.js';
 import { notifyLater } from '../services/notificationService.js';
 
 const handle = (action, status = 200) => async (request, response, next) => {
@@ -76,6 +76,10 @@ export const acceptInvitationController = handle(async (request) => {
 export const listPlatformOfficesController = handle(
   async (request) => ({ offices: await listOffices(request.user, request.query) })
 );
+
+export const markAllOfficesSeenController = handle((request) => markOfficesSeen(request.user));
+
+export const markOfficeSeenController = handle((request) => markOfficesSeen(request.user, request.params.officeId));
 
 export const reviewOfficeController = handle(async (request) => {
   const office = await reviewOffice(request.user, request.params.officeId, request.body);

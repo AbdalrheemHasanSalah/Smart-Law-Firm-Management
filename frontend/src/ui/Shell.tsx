@@ -1,10 +1,15 @@
 import {
+  Contact,
+  DatabaseBackup,
+  ShieldCheck,
+  Landmark,
   Banknote,
   Receipt,
   Briefcase,
   Building2,
   CalendarDays,
   ChartColumn,
+  ChevronDown,
   IdCard,
   Inbox,
   Globe,
@@ -23,50 +28,68 @@ import {
   UsersRound,
   Wallet,
   type LucideIcon,
+  BookOpen,
+  FileStack,
+  PenLine,
 } from 'lucide-react'
-import { motion } from 'motion/react'
-import { useState, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { PATHS, personaOf, useAuth, type Persona } from '@/auth/auth'
 import { DEMO } from '@/lib/api'
 import { formatDay, ROLE } from '@/lib/labels'
+import { actsAsAdminFor, hasPermission, type Permission } from '@/lib/permissions'
+import type { OfficeRole } from '@/lib/types'
 import { SubscriptionBanner, SubscriptionLocked } from '@/pages/Subscriptions'
-import { NotificationBell, useUnreadMessages } from './Inbox'
+import { isUnseenRequest, usePlatformOffices } from '@/lib/platform'
+import { NotificationBell, PlatformBell, useUnreadMessages } from './Inbox'
 import { PreferenceControls } from './Preferences'
 import { cn, Logo, type StampTone } from './kit'
+import { LAW_PHOTOS } from './Slideshow'
 
 type NavItem = {
   to: string
   label: string
   icon: LucideIcon
   end?: boolean
-  badge?: 'messages'
+  badge?: 'messages' | 'requests'
   /** Also highlighted on pages under this path (for an entry that otherwise matches exactly). */
   within?: string
+  /** Shown only to members who hold it (`adminFor`: who act as the admin for it, as the server decides). */
+  permission?: Permission
+  adminFor?: boolean
+  /** Shown only to these office roles. */
+  roles?: readonly OfficeRole[]
 }
 
 const office = (extra: NavItem[] = []): NavItem[] => [
   { to: PATHS.office, label: 'الرئيسية', icon: LayoutDashboard, end: true },
-  { to: `${PATHS.office}/cases`, label: 'القضايا', icon: Briefcase },
-  { to: `${PATHS.office}/clients`, label: 'الموكّلون', icon: Users },
-  { to: `${PATHS.office}/tasks`, label: 'المهام', icon: ListChecks },
-  { to: `${PATHS.office}/calendar`, label: 'التقويم', icon: CalendarDays },
-  { to: `${PATHS.office}/documents`, label: 'المستندات', icon: FileText },
-  { to: `${PATHS.office}/contracts`, label: 'العقود', icon: FileSignature },
-  { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon },
+  { to: `${PATHS.office}/cases`, label: 'القضايا', icon: Briefcase, permission: 'cases.view' },
+  { to: `${PATHS.office}/clients`, label: 'الموكّلون', icon: Users, permission: 'cases.view' },
+  { to: `${PATHS.office}/tasks`, label: 'المهام', icon: ListChecks, permission: 'cases.view' },
+  { to: `${PATHS.office}/calendar`, label: 'التقويم', icon: CalendarDays, permission: 'cases.view' },
+  { to: `${PATHS.office}/documents`, label: 'المستندات', icon: FileText, permission: 'cases.view' },
+  { to: `${PATHS.office}/contracts`, label: 'العقود', icon: FileSignature, permission: 'cases.view' },
+  { to: `${PATHS.office}/powers-of-attorney`, label: 'التوكيلات', icon: StampIcon, permission: 'cases.view' },
   { to: `${PATHS.office}/messages`, label: 'الرسائل', icon: MessagesSquare, badge: 'messages' },
-  { to: `${PATHS.office}/consultations`, label: 'طلبات الاستشارة', icon: Inbox },
-  { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn },
+  { to: `${PATHS.office}/consultations`, label: 'طلبات الاستشارة', icon: Inbox, permission: 'clients.edit' },
+  { to: `${PATHS.office}/reports`, label: 'التقارير', icon: ChartColumn, permission: 'cases.view' },
   { to: `${PATHS.office}/me`, label: 'صفحتي', icon: IdCard },
-  { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
+  { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen, permission: 'cases.view' },
+  { to: `${PATHS.office}/templates`, label: 'النماذج', icon: FileStack, permission: 'print' },
+  { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale, permission: 'cases.view' },
+  { to: `${PATHS.office}/directory`, label: 'الدليل المهني', icon: Contact, permission: 'cases.view' },
   ...extra,
 ]
 
 const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
   platform: {
     nav: [
-      { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/` },
+      { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/`, badge: 'requests' },
       { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
+      { to: `${PATHS.platform}/library`, label: 'المكتبة القانونية', icon: BookOpen },
+      { to: `${PATHS.platform}/courts`, label: 'دليل المحاكم', icon: Landmark },
+      { to: `${PATHS.platform}/backups`, label: 'النسخ الاحتياطية', icon: DatabaseBackup },
       { to: `${PATHS.platform}/support`, label: 'رسائل الدعم', icon: Headset },
     ],
     label: 'إدارة المنصّة',
@@ -75,13 +98,21 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     nav: office([
       { to: `${PATHS.office}/finance`, label: 'المالية', icon: Banknote },
       { to: `${PATHS.office}/team`, label: 'الفريق', icon: UsersRound },
+      { to: `${PATHS.office}/security`, label: 'الأمان والصلاحيات', icon: ShieldCheck },
       { to: `${PATHS.office}/public-page`, label: 'الصفحة العامة', icon: Globe },
+      { to: `${PATHS.office}/letterhead`, label: 'ترويسة الطباعة', icon: PenLine },
       { to: `${PATHS.office}/activity`, label: 'سجل النشاط', icon: History },
       { to: `${PATHS.office}/subscription`, label: 'الاشتراك', icon: CreditCard },
     ]),
     label: 'صاحب المكتب',
   },
-  lawyer: { nav: office([{ to: `${PATHS.office}/custody`, label: 'عُهدتي', icon: Wallet }]), label: 'فريق المكتب' },
+  lawyer: {
+    nav: office([
+      { to: `${PATHS.office}/custody`, label: 'عُهدتي', icon: Wallet, roles: ['lawyer', 'assistant'] },
+      { to: `${PATHS.office}/finance`, label: 'المالية', icon: Banknote, permission: 'finance.manage', adminFor: true },
+    ]),
+    label: 'فريق المكتب',
+  },
   client: {
     nav: [
       { to: PATHS.client, label: 'قضاياي', icon: Briefcase, end: true },
@@ -90,6 +121,74 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
     ],
     label: 'بوابة الموكّل',
   },
+}
+
+/**
+ * The side bar's list of sections. When it is taller than the screen it scrolls without a scroll
+ * bar: the edge with more sections behind it fades out, and an arrow at the bottom shows that the
+ * list goes on (clicking it scrolls down).
+ */
+const SideNav = ({ children }: { children: ReactNode }) => {
+  const list = useRef<HTMLElement>(null)
+  const items = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState({ above: false, below: false })
+
+  useEffect(() => {
+    const element = list.current
+    if (!element) return
+    const measure = () => {
+      const above = element.scrollTop > 2
+      const below = element.scrollTop + element.clientHeight < element.scrollHeight - 2
+      setMore((current) => (current.above === above && current.below === below ? current : { above, below }))
+    }
+    measure()
+    element.addEventListener('scroll', measure, { passive: true })
+    // The window's height and the number of sections both change what fits.
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    if (items.current) observer.observe(items.current)
+    return () => {
+      element.removeEventListener('scroll', measure)
+      observer.disconnect()
+    }
+  }, [])
+
+  const stops = [...(more.above ? ['transparent', 'black 2rem'] : ['black']), ...(more.below ? ['black calc(100% - 4rem)', 'transparent'] : ['black'])]
+  const fade = `linear-gradient(to bottom, ${stops.join(', ')})`
+
+  return (
+    <div className="relative mt-2 flex min-h-0 flex-1 flex-col">
+      <nav
+        ref={list}
+        aria-label="أقسام العمل"
+        style={{ maskImage: fade, WebkitMaskImage: fade }}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <div ref={items} className="space-y-1 pb-1">
+          {children}
+        </div>
+      </nav>
+      <AnimatePresence>
+        {more.below && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center">
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => list.current?.scrollBy({ top: list.current.clientHeight * 0.6, behavior: 'smooth' })}
+              aria-label="المزيد من الأقسام"
+              title="المزيد من الأقسام"
+              className="pointer-events-auto grid size-8 place-items-center rounded-full border border-paper/15 bg-desk-light text-paper/80 shadow-[0_6px_16px_-6px_rgb(0_0_0/0.6)] transition-colors hover:bg-stamp hover:text-paper"
+            >
+              <ChevronDown className="size-4 animate-bounce motion-reduce:animate-none" aria-hidden="true" />
+            </motion.button>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 const initialsOf = (name = '') =>
@@ -109,7 +208,12 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   const navigate = useNavigate()
   const location = useLocation()
   const persona = personaOf(session) ?? 'lawyer'
-  const { nav, label } = PERSONA[persona]
+  const { nav: personaNav, label } = PERSONA[persona]
+  const nav = personaNav.filter(
+    (item) =>
+      (!item.roles || (session?.role != null && item.roles.includes(session.role))) &&
+      (!item.permission || (item.adminFor ? actsAsAdminFor : hasPermission)(session, item.permission)),
+  )
   const roleName = persona === 'platform' ? 'مدير المنصّة' : persona === 'owner' ? 'صاحب المكتب' : ROLE[session?.role ?? 'lawyer']
   const signOut = () => void logout().then(() => navigate(PATHS.login))
   // Every side-bar entry leads to the main page of its section. Clicking the section you are
@@ -129,12 +233,22 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   return (
     <div className="min-h-dvh bg-paper-shade lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)]">
       {/* side bar */}
-      <aside className="desk sticky top-0 hidden h-dvh flex-col px-4 py-5 lg:flex">
-        <Link to={nav[0]!.to} onClick={restart(nav[0]!.to)} aria-label="قضيتي" className="px-2">
+      <aside className="desk sticky top-0 hidden h-dvh flex-col overflow-hidden px-4 py-5 lg:flex">
+        {/* a judge's gavel down the whole side bar, under a navy haze so the sections stay legible */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <img
+            src={`${LAW_PHOTOS[0].src}?auto=format&fit=crop&w=1400&q=70`}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="lit-photo side-photo size-full object-cover object-[72%_50%] opacity-90"
+          />
+          <div className="side-haze absolute inset-0" />
+        </div>
+        <Link to={nav[0]!.to} onClick={restart(nav[0]!.to)} aria-label="قضيتي" className="relative px-2">
           <Logo onDesk />
         </Link>
-        <p className="mt-6 px-3 text-[0.7rem] font-semibold text-paper/45">{label}</p>
-        <nav aria-label="أقسام العمل" className="mt-2 flex-1 space-y-1 overflow-y-auto">
+        <p className="relative mt-6 px-3 text-[0.7rem] font-semibold text-paper/55">{label}</p>
+        <SideNav>
           {nav.map(({ to, label: text, icon: Icon, end, badge, within }) => (
             <NavLink
               key={to}
@@ -155,13 +269,13 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
                   )}
                   <Icon className="relative size-[1.15rem] transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
                   <span className="relative flex-1">{text}</span>
-                  {badge && <UnreadBadge active={isActive} />}
+                  {badge && <NavBadge kind={badge} active={isActive || isWithin(within)} />}
                 </>
               )}
             </NavLink>
           ))}
-        </nav>
-        <div className="mt-4 flex items-center gap-3 rounded-xl bg-paper/8 p-3">
+        </SideNav>
+        <div className="relative mt-4 flex items-center gap-3 rounded-xl bg-paper/8 p-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-paper text-sm font-bold text-ink">{initialsOf(session?.user.full_name)}</span>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-sm font-semibold text-paper">{session?.user.full_name}</p>
@@ -189,7 +303,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
             </div>
             <div className="flex items-center gap-2">
               <PreferenceControls />
-              {hasInbox && <NotificationBell />}
+              {hasInbox ? <NotificationBell /> : <PlatformBell />}
             <button type="button" onClick={signOut} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink lg:hidden">
               <LogOut className="size-4 rtl:-scale-x-100" aria-hidden="true" />
               خروج
@@ -209,7 +323,7 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
               >
                 <Icon className="size-4" aria-hidden="true" />
                 {text}
-                {badge && <UnreadBadge active />}
+                {badge && <NavBadge kind={badge} active />}
               </NavLink>
             ))}
           </nav>
@@ -239,9 +353,17 @@ export const Shell = ({ children, plain = false }: { children: ReactNode; plain?
   )
 }
 
-/** Count of unread direct messages beside the "messages" entry. */
-const UnreadBadge = ({ active }: { active: boolean }) => {
-  const unread = useUnreadMessages().data ?? 0
+/** A count beside a side-bar entry: unread messages, or office requests not opened yet. */
+const NavBadge = ({ kind, active }: { kind: 'messages' | 'requests'; active: boolean }) =>
+  kind === 'messages' ? <MessagesBadge active={active} /> : <RequestsBadge active={active} />
+
+const MessagesBadge = ({ active }: { active: boolean }) => <CountBadge count={useUnreadMessages().data ?? 0} active={active} />
+
+const RequestsBadge = ({ active }: { active: boolean }) => (
+  <CountBadge count={(usePlatformOffices().data ?? []).filter(isUnseenRequest).length} active={active} />
+)
+
+const CountBadge = ({ count: unread, active }: { count: number; active: boolean }) => {
   if (!unread) return null
   return (
     <span className={cn('relative grid min-w-5 place-items-center rounded-full px-1 text-[0.65rem] leading-5 font-bold', active ? 'bg-paper text-stamp' : 'bg-stamp text-paper')}>

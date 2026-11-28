@@ -1,11 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
+import { MyNotices, PushToggle, SendToOffice } from './PortalLink'
+import { VoicePlayer } from '@/ui/Voice'
 import { motion } from 'motion/react'
+import { useEffect } from 'react'
+import { useLocation } from 'react-router'
 import { CalendarClock, Download, FileText } from 'lucide-react'
 import { api, DEMO } from '@/lib/api'
 import { daysUntil, documentDownloadUrl, useMyHearings, useSharedDocuments, type UpcomingHearing } from '@/lib/portal'
 import { CASE_STATUS, CASE_TYPE, formatDate, formatDay, formatTime } from '@/lib/labels'
 import type { CaseNote, DocumentRecord, LegalCase } from '@/lib/types'
 import { cn, Stamp } from '@/ui/kit'
+import { ClientStage } from './Workflow'
 import { Empty, Failed, Loading, SheetHeader } from '@/ui/Shell'
 import { MyPowers } from './PowersOfAttorney'
 
@@ -20,7 +25,8 @@ const LatestUpdate = ({ caseId }: { caseId: string }) => {
   if (!latest) return <p className="text-sm text-ink-faint">{notes.isPending ? '…' : 'لم يكتب محاميك تحديثاً بعد.'}</p>
   return (
     <div className="border-s-4 border-stamp bg-paper p-3">
-      <p className="text-sm leading-relaxed text-ink">{latest.body}</p>
+      {latest.voice && <VoicePlayer clip={latest.voice} className="mb-1" />}
+      {latest.body && <p className="text-sm leading-relaxed text-ink">{latest.body}</p>}
       <p className="mt-1 text-xs text-ink-soft">{formatDate(latest.created_at)}</p>
     </div>
   )
@@ -93,9 +99,18 @@ export const Portal = () => {
   const hearings = useMyHearings()
   const documents = useSharedDocuments()
   const nextHearing = (caseId: string) => hearings.data?.find((hearing) => hearing.case_id === caseId)
+  // A notification about one case links to "#case-<id>": scroll to that case once the list is in.
+  const { hash } = useLocation()
+  const target = hash.startsWith('#case-') ? hash.slice('#case-'.length) : null
+  useEffect(() => {
+    if (!target || !cases.data) return
+    document.getElementById(`case-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [target, cases.data])
   return (
     <>
       <SheetHeader title="قضاياي" note="ما يشاركه مكتبك معك يظهر هنا." />
+      <PushToggle className="mb-6" />
+      <MyNotices />
       {hearings.data && hearings.data.length > 0 && <UpcomingHearings hearings={hearings.data} />}
       {cases.isPending ? (
         <Loading />
@@ -108,10 +123,11 @@ export const Portal = () => {
           {cases.data.map((row, index) => (
             <motion.li
               key={row.case_id}
+              id={`case-${row.case_id}`}
               initial={{ opacity: 0, y: 40 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: 'spring', stiffness: 100, damping: 15, delay: index * 0.1 }}
-              className="relative pt-7"
+              className={cn('relative scroll-mt-24 pt-7', target === row.case_id && 'rounded-md ring-2 ring-stamp/60 ring-offset-4 ring-offset-paper')}
             >
               <span className={cn('tab-cut absolute top-0 right-6 flex h-8 w-36 items-center justify-center rounded-t-md bg-stamp-green text-sm font-semibold text-paper')} dir="ltr">
                 {row.case_number}
@@ -128,6 +144,7 @@ export const Portal = () => {
                     {CASE_TYPE[row.case_type] ?? row.case_type} · فُتحت {formatDate(row.opened_at)}
                   </p>
                   {row.description && <p className="mt-3 leading-relaxed text-ink-soft">{row.description}</p>}
+                  <ClientStage caseId={row.case_id} />
                   {nextHearing(row.case_id) && (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-stamp/8 px-2.5 py-1 text-sm text-ink">
                       <CalendarClock className="size-4 text-stamp" aria-hidden="true" />
@@ -147,6 +164,7 @@ export const Portal = () => {
           ))}
         </ul>
       )}
+      {cases.data && <SendToOffice cases={cases.data} />}
       <MyPowers />
     </>
   )

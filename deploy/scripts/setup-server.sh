@@ -111,6 +111,8 @@ fi
 
 echo "==> Nightly backups at 03:00"
 install -m 755 "$SCRIPT_DIR/backup.sh" /usr/local/bin/qadiyati-backup
+install -m 755 "$SCRIPT_DIR/restore.sh" /usr/local/bin/qadiyati-restore
+mkdir -p /var/lib/qadiyati && chmod 755 /var/lib/qadiyati
 echo "0 3 * * * root /usr/local/bin/qadiyati-backup >> /var/log/qadiyati-backup.log 2>&1" > /etc/cron.d/qadiyati-backup
 
 echo "==> Keep running with the lid closed (a laptop used as a server)"

@@ -1,4 +1,5 @@
 import { query as databaseQuery } from '../config/db.js';
+import { pushToUser } from './pushService.js';
 import { getSecurityConfig } from '../config/security.js';
 import { sendMail as deliverMail } from './mailService.js';
 import { notificationEmail } from './notificationService.js';
@@ -10,6 +11,8 @@ import { notificationEmail } from './notificationService.js';
  *   task          the person it is assigned to, the day before it is due
  *   appointment   the staff member it is with, on its morning
  *   poa           the office administrators and the lawyers it names, 30 and 7 days before it expires
+ *   installment   the office administrators, the day before a fee installment is due, and the day
+ *                 after if it is still unpaid
  *
  * Days are counted in the office's time zone (REMINDER_TIMEZONE, Palestine by default), and
  * nothing is sent before the morning hour (REMINDER_MORNING_HOUR, 7 by default).
@@ -129,6 +132,24 @@ const DUE = {
      WHERE p.status = 'active' AND p.expires_on IS NOT NULL
        AND p.expires_on BETWEEN $1::date AND $1::date + 30`,
   },
+  installment: {
+    values: ({ today, tomorrow }) => [today, tomorrow],
+    sql: `
+    SELECT 'installment' AS kind, fi.installment_id AS subject_id, to_char(fi.due_on, 'YYYY-MM-DD') AS at,
+           (fi.amount::text || ' ' || a.currency) AS detail,
+           lc.case_id, lc.case_number, fi.office_id,
+           CASE WHEN fi.due_on = $2::date THEN 'day_before' ELSE 'overdue' END AS moment,
+           ${PERSON}
+      FROM fee_installments fi
+      JOIN fee_agreements a ON a.agreement_id = fi.agreement_id AND a.status = 'active'
+      JOIN invoices i ON i.invoice_id = fi.invoice_id AND i.status IN ('unpaid', 'partially_paid')
+      JOIN law_offices o ON o.office_id = fi.office_id AND o.status = 'active'
+      JOIN legal_cases lc ON lc.case_id = a.case_id AND lc.office_id = fi.office_id
+      JOIN office_memberships admin_m ON admin_m.office_id = fi.office_id
+      JOIN roles r ON r.role_id = admin_m.role_id AND r.role_name = 'admin'
+      ${ACTIVE_MEMBER('admin_m.user_id', 'fi.office_id')}
+     WHERE fi.due_on IN ($2::date, $1::date - 1)`,
+  },
 };
 
 /** The key that makes a reminder unique: what, when, and which of its reminders. */
@@ -168,7 +189,8 @@ export function reminderMessage(row, timeZone) {
       return {
         title: 'تذكير: موعد اليوم',
         body: `لديك ${APPOINTMENT_NAMES[row.detail] ?? 'موعد'}${inCase} اليوم الساعة ${time}.`,
-        path: '/office/calendar', button: 'افتح التقويم',
+        // The calendar opens on the appointment's day (local, like the reminder itself).
+        path: `/office/calendar?day=${localClock(new Date(row.at), timeZone).day}`, button: 'افتح التقويم',
       };
     case 'poa': {
       const days = Number(row.days_left);
@@ -179,6 +201,18 @@ export function reminderMessage(row, timeZone) {
         path: '/office/powers-of-attorney?state=expiring', button: 'افتح التوكيلات',
       };
     }
+    case 'installment':
+      return row.moment === 'day_before'
+        ? {
+            title: 'قسط أتعاب مستحق غداً',
+            body: `يستحق غداً قسط أتعاب بقيمة ${row.detail}${inCase}.`,
+            path: `/office/cases/${row.case_id}?tab=finance`, button: 'افتح مالية القضية',
+          }
+        : {
+            title: 'قسط أتعاب متأخر',
+            body: `لم يُسدَّد قسط أتعاب بقيمة ${row.detail}${inCase} كان مستحقاً أمس.`,
+            path: `/office/cases/${row.case_id}?tab=finance`, button: 'افتح مالية القضية',
+          };
     default:
       return null;
   }
@@ -193,11 +227,18 @@ export function defaultChannels({ query, sendMail }) {
       name: 'in_app',
       async deliver({ person, officeId, message }) {
         await query(
-          `INSERT INTO notifications (title, body, notification_type, user_id, office_id)
-           VALUES ($1, $2, 'reminder', $3, $4)`,
-          [message.title, message.body, person.user_id, officeId]
+          `INSERT INTO notifications (title, body, notification_type, user_id, office_id, link_path)
+           VALUES ($1, $2, 'reminder', $3, $4, $5)`,
+          [message.title, message.body, person.user_id, officeId, message.path]
         );
         return true;
+      },
+    },
+    {
+      // On the person's phone or computer, when they turned push notifications on there.
+      name: 'push',
+      async deliver({ person, message }) {
+        return (await pushToUser(person.user_id, { title: message.title, body: message.body, url: message.path }, query)) > 0;
       },
     },
     {

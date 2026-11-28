@@ -1,4 +1,5 @@
 import { CalendarPlus, Check, HandCoins, Pencil, X } from 'lucide-react'
+import { PushToggle } from './PortalLink'
 import { useEffect, useState, type ReactNode } from 'react'
 import { messageOf } from '@/lib/api'
 import {
@@ -547,6 +548,7 @@ export const MyHr = () => {
         note="سجلّك في المكتب، ورصيد إجازتك، وطلباتك، ورواتبك المصروفة."
         action={<Button variant="ink" size="sm" onClick={() => setRequesting(true)}><CalendarPlus className="size-4" aria-hidden="true" />طلب إجازة</Button>}
       />
+      <PushToggle className="mb-6" />
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-md border border-ink/15 bg-paper/60 p-4">
           <p className="text-xs text-ink-faint">المتبقي من الإجازة السنوية</p>
