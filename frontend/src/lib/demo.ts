@@ -35,6 +35,7 @@ import { analysisRoutes } from './demoAnalysis'
 import { demoVerification, draftingRoutes } from './demoDrafting'
 import { demoAttachment, portalRoutes } from './demoPortal'
 import { workflowRoutes } from './demoWorkflow'
+import { directoryRoutes } from './demoDirectory'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1317,6 +1318,8 @@ const routes: Route[] = [
           user_id: users.find((user) => user.client_id === link.client_id)?.user_id ?? null,
         })),
   }) as Route[]),
+  // courts, colleagues and message templates
+  ...(directoryRoutes({ fail, uid }) as Route[]),
   // case stages, fee agreements and the client briefcase
   ...(workflowRoutes({
     fail,

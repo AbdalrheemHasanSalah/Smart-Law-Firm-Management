@@ -29,6 +29,7 @@ import draftingRoutes from './draftingRoutes.js';
 import voiceRoutes from './voiceRoutes.js';
 import portalRoutes from './portalRoutes.js';
 import workflowRoutes from './workflowRoutes.js';
+import directoryRoutes from './directoryRoutes.js';
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.use(draftingRoutes);
 router.use(voiceRoutes);
 router.use(portalRoutes);
 router.use(workflowRoutes);
+router.use(directoryRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseAnalysisRoutes);
 router.use('/cases', caseRoutes);

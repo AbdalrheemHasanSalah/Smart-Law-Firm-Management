@@ -219,7 +219,14 @@ CREATE TABLE IF NOT EXISTS courts (
     court_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(150) NOT NULL,
     location TEXT,
-    court_type VARCHAR(50)
+    court_type VARCHAR(50),
+    city VARCHAR(80),
+    phone VARCHAR(40),
+    email VARCHAR(150),
+    working_hours VARCHAR(150),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
 );
 
 -- 7. Legal cases
@@ -1257,6 +1264,41 @@ CREATE TABLE IF NOT EXISTS fee_installments (
     FOREIGN KEY (office_id, agreement_id) REFERENCES fee_agreements(office_id, agreement_id) ON DELETE CASCADE
 );
 
+-- 15i. The professional directory and colleague message templates. See migration 0022.
+CREATE TABLE IF NOT EXISTS court_office_notes (
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    court_id UUID NOT NULL REFERENCES courts(court_id) ON DELETE CASCADE,
+    note VARCHAR(1000) NOT NULL,
+    updated_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (office_id, court_id)
+);
+
+CREATE TABLE IF NOT EXISTS colleagues (
+    colleague_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    full_name VARCHAR(150) NOT NULL,
+    bar_number VARCHAR(40),
+    phone VARCHAR(40),
+    email VARCHAR(150),
+    city VARCHAR(80),
+    office_name VARCHAR(150),
+    notes VARCHAR(1000),
+    created_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS colleague_message_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
+    title VARCHAR(120) NOT NULL,
+    body VARCHAR(3000) NOT NULL,
+    created_by_user_id UUID REFERENCES app_users(user_id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
 -- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
@@ -1367,3 +1409,6 @@ CREATE INDEX IF NOT EXISTS idx_fee_agreements_case ON fee_agreements(case_id, cr
 CREATE INDEX IF NOT EXISTS idx_fee_agreements_client ON fee_agreements(client_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fee_installments_agreement ON fee_installments(agreement_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_fee_installments_invoice ON fee_installments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_courts_city ON courts(city, name);
+CREATE INDEX IF NOT EXISTS idx_colleagues_office ON colleagues(office_id, full_name);
+CREATE INDEX IF NOT EXISTS idx_colleague_templates_office ON colleague_message_templates(office_id, title);

@@ -24,6 +24,7 @@ import { LawPage, LegalLibrary, RulingPage } from './pages/LegalLibrary'
 import { LibraryImport } from './pages/LibraryImport'
 import { LetterheadSettings, Templates, VerifyDocument } from './pages/PrintSettings'
 import { ClientBriefcase } from './pages/Workflow'
+import { Directory, PlatformCourts } from './pages/Directory'
 import { Shell } from './ui/Shell'
 import { SupportWidget } from './ui/SupportWidget'
 
@@ -60,6 +61,7 @@ export const App = () => (
       <Route path={`${PATHS.office}/custody`} element={office(<MyCustody />)} />
       <Route path={`${PATHS.office}/reports`} element={office(<Reports />)} />
       <Route path={`${PATHS.office}/tools`} element={office(<Tools />)} />
+      <Route path={`${PATHS.office}/directory`} element={office(<Directory />)} />
       <Route path={`${PATHS.office}/library`} element={office(<LegalLibrary />)} />
       <Route path={`${PATHS.office}/templates`} element={office(<Templates />)} />
       <Route path={`${PATHS.office}/letterhead`} element={office(<LetterheadSettings />, ['admin'])} />
@@ -81,6 +83,7 @@ export const App = () => (
       <Route path={PATHS.client} element={<Require roles={['client']}><Shell><Portal /></Shell></Require>} />
       <Route path={`${PATHS.office}/subscription`} element={office(<OfficeSubscription />, ['admin'])} />
       <Route path={`${PATHS.platform}/support`} element={<Require platform><Shell><SupportInbox /></Shell></Require>} />
+      <Route path={`${PATHS.platform}/courts`} element={<Require platform><Shell><PlatformCourts /></Shell></Require>} />
       <Route path={`${PATHS.platform}/library`} element={<Require platform><Shell><LibraryImport /></Shell></Require>} />
       <Route path={`${PATHS.platform}/subscriptions`} element={<Require platform><Shell><PlatformSubscriptions /></Shell></Require>} />
       <Route path={`${PATHS.platform}/offices/:officeId`} element={<Require platform><Shell><OfficeRequest /></Shell></Require>} />

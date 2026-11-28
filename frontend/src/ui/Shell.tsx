@@ -1,4 +1,6 @@
 import {
+  Contact,
+  Landmark,
   Banknote,
   Receipt,
   Briefcase,
@@ -64,6 +66,7 @@ const office = (extra: NavItem[] = []): NavItem[] => [
   { to: `${PATHS.office}/library`, label: 'المكتبة القانونية', icon: BookOpen },
   { to: `${PATHS.office}/templates`, label: 'النماذج', icon: FileStack },
   { to: `${PATHS.office}/tools`, label: 'الأدوات القانونية', icon: Scale },
+  { to: `${PATHS.office}/directory`, label: 'الدليل المهني', icon: Contact },
   ...extra,
 ]
 
@@ -73,6 +76,7 @@ const PERSONA: Record<Persona, { nav: NavItem[]; label: string }> = {
       { to: PATHS.platform, label: 'طلبات المكاتب', icon: Building2, end: true, within: `${PATHS.platform}/offices/` },
       { to: `${PATHS.platform}/subscriptions`, label: 'الاشتراكات', icon: Wallet },
       { to: `${PATHS.platform}/library`, label: 'المكتبة القانونية', icon: BookOpen },
+      { to: `${PATHS.platform}/courts`, label: 'دليل المحاكم', icon: Landmark },
       { to: `${PATHS.platform}/support`, label: 'رسائل الدعم', icon: Headset },
     ],
     label: 'إدارة المنصّة',

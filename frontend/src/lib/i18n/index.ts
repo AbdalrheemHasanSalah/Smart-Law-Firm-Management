@@ -43,6 +43,17 @@ function redactedPart(part: string) {
 /** Texts built from variables: [Arabic pattern, English]. Checked when no exact entry matches. */
 const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   // Before the general "X من Y" patterns below.
+  [/^رسالة إلى (.+)$/, (_, name) => `Message to ${name}`],
+  [/^حذف (.+) من دليل المكتب؟$/, 'Remove $1 from the office directory?'],
+  [/^حذف القالب «(.+)»؟$/, 'Delete the template “$1”?'],
+  [/^المادة 152\(1\): (\d+) ديناراً × ([\d.]+)% عجز دائم\.$/, 'Art. 152(1): $1 dinars × $2% permanent disability.'],
+  [/^المادة 152\(2\): (\d+) ديناراً × عدد الليالي \((\d+)\)\.$/, 'Art. 152(2): $1 dinars × number of nights ($2).'],
+  [/^المادة 152\(3\): (\d+) دينار عن العملية أو العمليات التي استلزمت المكوث في المشفى\.$/, 'Art. 152(3): $1 dinars for the surgery or surgeries that required a hospital stay.'],
+  [/^المادة 152\(4\): تعويض لا يزيد عن (\d+) دينار، تقدّره المحكمة\.$/, 'Art. 152(4): compensation of up to $1 dinars, set by the court.'],
+  [/^المادة 153: لا يزيد مجموع الضرر المعنوي عن ([\d,]+) دينار\.$/, 'Art. 153: total non-material damages may not exceed $1 dinars.'],
+  [/^المادة 154: خمسون بالمائة من سقف المادة 153 \(([\d,]+) دينار\) مطروحاً منه حصة الورثة المعالين \(([\d.]+)%\) وفق حجة حصر الإرث\.$/, 'Art. 154: fifty percent of the art. 153 ceiling ($1 dinars), less the dependent heirs’ share ($2%) under the inheritance certificate.'],
+  [/^المادة 156: 100% من الأجر اليومي × عدد الأيام \((\d+)\)( \(بلغت حدّ السنتين من تاريخ الحادث\))?\. الأجر اليومي = الشهري ÷ (\d+) \(عُرف، لا نص\)\.$/, (_, days, capped, divisor) => `Art. 156: 100% of the daily wage × number of days (${days})${capped ? ' (the two-year limit from the accident was reached)' : ''}. Daily wage = monthly ÷ ${divisor} (practice, not the text of the law).`],
+  [/^الأجر بعد سقف المادة 155 × ([\d.]+)% × 12 شهراً × عدد السنوات \(([\d.]+)\)، ناقص ([\d.]+)% مقابل الدفع الفوري \(المادة 157\)\. عدد السنوات ونسبة الخصم يحددهما المحامي بحسب العمل القضائي؛ القانون لا يضع لهما معادلة\.$/, 'Wage after the art. 155 cap × $1% × 12 months × number of years ($2), less $3% for immediate payment (art. 157). The lawyer sets the years and the discount from case law; the law gives no formula for them.'],
   [/^قسط (\d+) من (\d+) — (.+)$/, 'Installment $1 of $2 — $3'],
   [/^(انقل القضية|نقل القضية) إلى مرحلة (.+)$/, (_, verb, stage) => `${verb === 'انقل القضية' ? 'Move' : 'Moving'} the case to the ${translate(stage)} stage`],
   [/^(\d+) أقساط متأخرة$/, '$1 overdue installments'],
