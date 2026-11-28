@@ -77,10 +77,13 @@
   --color-note: #172a3c;
   --color-note-blue: #1b3349;
   --color-note-pink: #3b1f27;
-  /* bg-white cards become the raised dark surface */
+  /*
+   * bg-white cards become the raised dark surface. The page under them (paper-shade) is a step
+   * deeper, so the cards stand clear of it the way white cards do on the light page.
+   */
   --color-white: #13263a;
   --color-surface: #0f1e2d;
-  --color-surface-shade: #142638;
+  --color-surface-shade: #0a1622;
 }
 /*
  * Scroll bars: a slim slate pill on a clear track, no arrow buttons, darker on hover and stamp red
@@ -141,7 +144,7 @@
   background-color: #1a3047;
 }
 :root[data-theme='dark'] .bg-paper-shade\/60 {
-  background-color: rgb(20 38 56 / 0.6);
+  background-color: rgb(10 22 34 / 0.6);
 }
 :root[data-theme='dark'] .bg-paper\/90 {
   background-color: rgb(15 30 45 / 0.9);
@@ -176,6 +179,68 @@
 }
 :root[data-theme='dark'] ::selection {
   color: #fff;
+}
+
+/*
+ * Law photographs: the dashboard's card headers, number cards and welcome banner, and the side
+ * bar. By day each sits under a navy wash. At night the photo shows its own colours, toned down
+ * (dimmer, less saturated) so the bright ones do not glare, under a shade from the same deep navy
+ * family as the page rather than plain black, so the photos and the navy cards read as one set.
+ */
+.header-photo {
+  opacity: 0.75;
+}
+.header-wash {
+  background-image: linear-gradient(to top, rgb(6 29 51 / 0.88), rgb(6 29 51 / 0.35));
+}
+.photo-wash {
+  background-image: linear-gradient(to top, var(--color-desk), rgb(6 29 51 / 0.7), rgb(6 29 51 / 0.1));
+}
+.banner-wash {
+  background-image: linear-gradient(to left, var(--color-desk), rgb(6 29 51 / 0.75), rgb(6 29 51 / 0.2));
+}
+.side-haze {
+  background-image: linear-gradient(to bottom, rgb(6 29 51 / 0.25), rgb(6 29 51 / 0.6), rgb(6 29 51 / 0.75));
+}
+
+:root[data-theme='dark'] .header-photo,
+:root[data-theme='dark'] .photo-card-img,
+:root[data-theme='dark'] .lit-photo {
+  opacity: 1;
+  filter: brightness(0.78) saturate(0.82);
+}
+/* the banner is the largest photo on the page and its paper background is pale, so it is dimmed the most */
+:root[data-theme='dark'] .lit-photo {
+  filter: brightness(0.55) saturate(0.7);
+}
+:root[data-theme='dark'] .header-wash {
+  background-image: linear-gradient(to top, rgb(5 14 24 / 0.86), rgb(5 14 24 / 0.3));
+}
+:root[data-theme='dark'] .photo-wash {
+  background-image: linear-gradient(to top, rgb(5 14 24 / 0.88), rgb(5 14 24 / 0.4) 55%, rgb(5 14 24 / 0.12));
+}
+:root[data-theme='dark'] .banner-wash {
+  background-image: linear-gradient(to left, rgb(5 14 24 / 0.92), rgb(5 14 24 / 0.62) 45%, rgb(5 14 24 / 0.4));
+}
+/* the side bar sits beside everything else and carries the menu, so its photo stays quieter still */
+:root[data-theme='dark'] .side-photo {
+  opacity: 0.9;
+  filter: brightness(0.62) saturate(0.75);
+}
+:root[data-theme='dark'] .side-haze {
+  background-image: linear-gradient(to bottom, rgb(5 14 24 / 0.35), rgb(5 14 24 / 0.6), rgb(5 14 24 / 0.82));
+}
+/* the dashboard's cards (the banner, the number cards and the text cards) get a white edge at night */
+:root[data-theme='dark'] .card-edge {
+  border: 1px solid rgb(255 255 255 / 0.85);
+}
+/* the icon square on the number cards takes a deeper red at night */
+:root[data-theme='dark'] .photo-chip {
+  background-color: #b3202c;
+}
+/* the "subscription ends in N days" bar: its amber writing is brown by day, a light amber at night */
+:root[data-theme='dark'] .text-\[\#7a4709\] {
+  color: #f1b867;
 }
 
 @layer base {
