@@ -1030,6 +1030,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_article
 CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_ruling
     ON case_legal_references(case_id, ruling_id) WHERE ruling_id IS NOT NULL;
 
+-- 15d. Case analysis tools: each AI tool run on a case. See migration 0017.
+CREATE TABLE IF NOT EXISTS case_ai_analyses (
+    analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    case_id UUID NOT NULL,
+    tool VARCHAR(30) NOT NULL CHECK (tool IN (
+        'argument', 'legal_question', 'gaps_defenses', 'document', 'appeal_grounds',
+        'contract_review', 'judgment', 'brief_check', 'minutes', 'translate'
+    )),
+    question TEXT,
+    target_language VARCHAR(2) CHECK (target_language IS NULL OR target_language IN ('en', 'he', 'fr')),
+    model_name VARCHAR(100),
+    provider VARCHAR(20),
+    result JSONB NOT NULL,
+    redaction JSONB NOT NULL DEFAULT '{}'::jsonb,
+    tasks_created_at TIMESTAMPTZ,
+    created_by_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT case_ai_analyses_case_fkey FOREIGN KEY (office_id, case_id)
+        REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
+);
+
 -- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
@@ -1114,3 +1136,6 @@ CREATE INDEX IF NOT EXISTS idx_gazette_issues_published ON gazette_issues(publis
 CREATE INDEX IF NOT EXISTS idx_office_library_items_office ON office_library_items(office_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_office_legal_principles_office ON office_legal_principles(office_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_case_legal_references_case ON case_legal_references(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_ai_analyses_case ON case_ai_analyses(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_ai_analyses_office_month ON case_ai_analyses(office_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_interactions_office_created ON ai_interactions(office_id, created_at);

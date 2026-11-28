@@ -1,7 +1,7 @@
 import { query as databaseQuery } from '../config/db.js';
 import { getSubscriptionConfig } from '../config/subscription.js';
 import { normalizeName } from './conflictService.js';
-import { chatWithAi, isAiConfigured } from './hearingPrepService.js';
+import { chatWithAi, isAiConfigured } from './aiProvider.js';
 import { escapeHtml, sendMail } from './mailService.js';
 
 /**

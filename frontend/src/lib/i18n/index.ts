@@ -20,8 +20,30 @@ const ARABIC = /[؀-ۿ]/
 
 const n = (value: string) => (value === '1' ? '' : 's')
 
+/** One part of the analysis redaction note: "اسمان" → "2 names", "3 هواتف" → "3 phones". */
+const REDACTED_ONE: Record<string, string> = {
+  'اسم واحد': '1 name', اسمان: '2 names', 'رقم هوية واحد': '1 ID number', 'رقما هوية': '2 ID numbers',
+  'هاتف واحد': '1 phone', هاتفان: '2 phones', 'بريد واحد': '1 email', بريدان: '2 emails',
+}
+const REDACTED_MANY: [RegExp, string][] = [
+  [/^(\d+) (?:أسماء|اسماً)$/, 'names'],
+  [/^(\d+) (?:أرقام هويات|رقم هوية)$/, 'ID numbers'],
+  [/^(\d+) (?:هواتف|هاتفاً)$/, 'phones'],
+  [/^(\d+) (?:عناوين بريد|عنوان بريد)$/, 'emails'],
+]
+function redactedPart(part: string) {
+  if (REDACTED_ONE[part]) return REDACTED_ONE[part]
+  for (const [pattern, noun] of REDACTED_MANY) {
+    const match = part.match(pattern)
+    if (match) return `${match[1]} ${noun}`
+  }
+  return part
+}
+
 /** Texts built from variables: [Arabic pattern, English]. Checked when no exact entry matches. */
 const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
+  // Before the general "X من Y" patterns below.
+  [/^استُعمل هذا الشهر (\d+) من (\d+)$/, 'Used this month: $1 of $2'],
   [/^(\d+) طلبات جديدة بانتظار قرارك$/, '$1 new requests awaiting your decision'],
   [/^طلب جديد واحد بانتظار قرارك$/, 'One new request awaiting your decision'],
   [/^طلبان جديدان بانتظار قرارك$/, 'Two new requests awaiting your decision'],
@@ -171,6 +193,12 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^بندان$/, '2 items'],
   [/^أُخفيت (\d+) (?:مواد|مادة) ملغاة تطابق البحث\.$/, '$1 repealed articles matching the search were hidden.'],
   [/^· (\d+) مادة مخزّنة ليست في الملف بقيت كما هي$/, (_, a) => `· ${a} stored article${n(a)} not in the file kept as they are`],
+  // Case analysis tools.
+  [/^(\d+) بنود غير موثّقة: تحقّق منها قبل الاعتماد عليها\.$/, '$1 unverified points: check them before relying on them.'],
+  [/^· إلى (.+)$/, '· into $1'],
+  [/^اختر: (.+)$/, 'Choose: $1'],
+  [/^تُرسل البيانات إلى (.+) بعد حجب الأسماء والأرقام\.$/, 'Data is sent to $1 after names and numbers are redacted.'],
+  [/^حُجب قبل الإرسال: (.+)\.$/, (_, parts) => `Redacted before sending: ${parts.split('، ').map(redactedPart).join(', ')}.`],
   // Parts joined with " · " (a citation, a date and a name…): each part on its own.
   [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".

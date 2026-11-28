@@ -34,6 +34,7 @@ import { Empty, Failed, Loading, Pill, SheetHeader } from '@/ui/Shell'
 import { CasesTable, useCases, useClients, useTasks } from './Office'
 import { CasePowers } from './PowersOfAttorney'
 import { CaseLibrary } from './LegalLibrary'
+import { CaseAnalysis } from './CaseAnalysis'
 import { CaseHearings, CaseNotices } from './CaseSessions'
 import { CaseProfit } from './FinanceOffice'
 
@@ -303,6 +304,7 @@ const TABS = [
   ['tasks', 'المهام'],
   ['finance', 'المالية'],
   ['prep', 'تحضير الجلسة'],
+  ['analysis', 'التحليل'],
 ] as const
 type TabKey = (typeof TABS)[number][0]
 
@@ -796,6 +798,7 @@ export const CaseFile = () => {
       {tab === 'tasks' && (caseTasks.length === 0 ? <Empty>لا مهام مرتبطة بهذه القضية.</Empty> : <TasksTable rows={caseTasks} />)}
       {tab === 'finance' && <CaseFinance caseId={caseId} />}
       {tab === 'prep' && <HearingPrepTab caseId={caseId} />}
+      {tab === 'analysis' && <CaseAnalysis caseId={caseId} />}
     </>
   )
 }

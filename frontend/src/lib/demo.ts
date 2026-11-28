@@ -31,6 +31,7 @@ import type { AccountType, Currency as MoneyCurrency, Custody, Expense, ExpenseC
 import type { Advance, LeaveRequest, LeaveType, Payslip, StaffRecord } from './hr'
 import type { Consultation, PageSettings } from './publicPage'
 import { libraryRoutes } from './demoLibrary'
+import { analysisRoutes } from './demoAnalysis'
 
 export const DEMO_PASSWORD = 'demo1234'
 export const DEMO_ACCOUNTS = {
@@ -1292,6 +1293,8 @@ const routes: Route[] = [
   }],
   // legal library (fictional sample texts)
   ...(libraryRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
+  // case analysis tools (fixed sample results, no model)
+  ...(analysisRoutes({ fail, uid, caseFor: caseFor as (user: never, caseId: string) => unknown }) as Route[]),
 ]
 
 const PORTAL_ROLES: Record<string, (user: DemoUser) => boolean> = {

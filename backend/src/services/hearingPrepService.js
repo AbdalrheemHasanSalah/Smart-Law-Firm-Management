@@ -1,7 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { ApiError as GeminiApiError, GoogleGenAI } from '@google/genai';
-
 import { query } from '../config/db.js';
+import { aiProvider, askForJson, geminiJson, isAiConfigured, requireProvider } from './aiProvider.js';
+import { assertWithinAllowance } from './aiUsage.js';
+import { PLACEHOLDER_INSTRUCTION, redactorForCase } from './redaction.js';
 import { auditLater } from './auditService.js';
 import { getCaseById, getCaseRelationships } from './caseService.js';
 
@@ -39,61 +39,8 @@ export class HearingPrepError extends Error {
   }
 }
 
-/* ───────────────────────── AI providers ───────────────────────── */
-
-let clientOverride = null;
-let geminiOverride = null;
-let cachedClient = null;
-let cachedGemini = null;
-
-/** Unit tests supply fake clients; nothing else should call these. */
-export function setAiClientForTests(client) {
-  clientOverride = client;
-}
-export function setGeminiClientForTests(client) {
-  geminiOverride = client;
-}
-
-const hasAnthropicKey = (env) => Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN);
-const hasGeminiKey = (env) => Boolean(env.GEMINI_API_KEY);
-
-/**
- * Which model writes AI sheets: AI_PROVIDER when its key is set, otherwise whichever key is
- * present (Claude first). null when neither is configured.
- */
-export function aiProvider(env = process.env) {
-  const anthropic = Boolean(clientOverride) || hasAnthropicKey(env);
-  const gemini = Boolean(geminiOverride) || hasGeminiKey(env);
-  if (env.AI_PROVIDER === 'gemini' && gemini) return 'gemini';
-  if (env.AI_PROVIDER === 'anthropic' && anthropic) return 'anthropic';
-  if (anthropic) return 'anthropic';
-  if (gemini) return 'gemini';
-  return null;
-}
-
-export function isAiConfigured(env = process.env) {
-  return aiProvider(env) !== null;
-}
-
-function requireProvider() {
-  const provider = aiProvider();
-  if (!provider) {
-    throw new HearingPrepError(503, 'The AI assistant is not configured on this server.', 'AI_NOT_CONFIGURED');
-  }
-  return provider;
-}
-
-function aiClient() {
-  if (clientOverride) return clientOverride;
-  cachedClient ??= new Anthropic();
-  return cachedClient;
-}
-
-function geminiClient() {
-  if (geminiOverride) return geminiOverride;
-  cachedGemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  return cachedGemini;
-}
+// Kept here for the callers and tests that import them from this module.
+export { aiProvider, chatWithAi, isAiConfigured, setAiClientForTests, setGeminiClientForTests } from './aiProvider.js';
 
 /* ───────────────────────── the case file ───────────────────────── */
 
@@ -101,7 +48,7 @@ const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : nul
 // The same wording as the frontend's PARTY_ROLE labels.
 const PARTY_ROLE_AR = { plaintiff: 'مدّعٍ', defendant: 'مدّعى عليه', applicant: 'مقدّم طلب', respondent: 'مستدعى ضدّه', witness: 'شاهد', client: 'موكّل' };
 
-async function collectCaseFile(actor, caseId) {
+export async function collectCaseFile(actor, caseId) {
   // Both throw 404 when the actor may not see the case.
   const caseRecord = await getCaseById(actor, caseId);
   const relationships = await getCaseRelationships(actor, caseId);
@@ -393,185 +340,10 @@ export function verifySheet(sheet, knownIds) {
   return result;
 }
 
-async function askClaude(userMessage) {
-  const model = process.env.AI_MODEL || DEFAULT_MODEL;
-  let response;
-  try {
-    response = await aiClient().beta.messages.create({
-      model,
-      max_tokens: 16000,
-      // A safety decline on the main model is retried on a fallback model in the same call.
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: {
-        effort: 'medium',
-        format: { type: 'json_schema', schema: PREP_SCHEMA },
-      },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
-    });
-  } catch (error) {
-    if (error instanceof HearingPrepError) throw error;
-    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
-      throw new HearingPrepError(503, 'The AI assistant credentials were rejected.', 'AI_NOT_CONFIGURED');
-    }
-    if (error instanceof Anthropic.RateLimitError) {
-      throw new HearingPrepError(429, 'The AI assistant is busy. Try again in a minute.', 'AI_BUSY');
-    }
-    if (error instanceof Anthropic.APIError) {
-      throw new HearingPrepError(502, 'The AI assistant could not answer. Try again later.', 'AI_FAILED');
-    }
-    throw error;
-  }
-
-  if (response.stop_reason === 'refusal') {
-    throw new HearingPrepError(422, 'The AI assistant declined to prepare this sheet.', 'AI_REFUSED');
-  }
-  if (response.stop_reason === 'max_tokens') {
-    throw new HearingPrepError(502, 'The AI answer was cut off. Try again with a narrower focus.', 'AI_FAILED');
-  }
-  const text = response.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
-  return { sheet: parseSheet(text), model: response.model };
-}
-
-function parseSheet(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new HearingPrepError(502, 'The AI answer could not be read. Try again.', 'AI_FAILED');
-  }
-}
-
-/** Finish reasons with which Gemini stops because its safety or policy filters blocked the answer. */
-const GEMINI_BLOCKED = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY']);
-
-/** Overloaded (503) or out of free quota (429): worth trying the lighter model. */
-const geminiBusy = (error) => error instanceof GeminiApiError && (error.status === 503 || error.status === 429);
-
+/** Gemini with the hearing-prep instructions and schema (the provider is chosen by askForJson). */
 export async function askGemini(userMessage) {
-  const primary = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-  const fallback = process.env.GEMINI_FALLBACK_MODEL || DEFAULT_GEMINI_FALLBACK_MODEL;
-  const request = (model) =>
-    geminiClient().models.generateContent({
-      model,
-      contents: userMessage,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        // JSON that follows the same schema as Claude's answer.
-        responseMimeType: 'application/json',
-        responseJsonSchema: PREP_SCHEMA,
-        maxOutputTokens: 16000,
-      },
-    });
-
-  let model = primary;
-  let response;
-  try {
-    try {
-      response = await request(primary);
-    } catch (error) {
-      // Free-tier models are often briefly overloaded; the lighter model usually still answers.
-      if (!geminiBusy(error) || !fallback || fallback === primary) throw error;
-      model = fallback;
-      response = await request(fallback);
-    }
-  } catch (error) {
-    if (error instanceof GeminiApiError) {
-      if (error.status === 400 && /api key/i.test(error.message)) {
-        throw new HearingPrepError(503, 'The Gemini API key was rejected.', 'AI_NOT_CONFIGURED');
-      }
-      if (error.status === 401 || error.status === 403) {
-        throw new HearingPrepError(503, 'The Gemini API key was rejected.', 'AI_NOT_CONFIGURED');
-      }
-      if (error.status === 429 || error.status === 503) {
-        throw new HearingPrepError(429, 'Gemini is busy or the free quota is used up. Try again in a minute.', 'AI_BUSY');
-      }
-      throw new HearingPrepError(502, 'Gemini could not answer. Try again later.', 'AI_FAILED');
-    }
-    throw error;
-  }
-
-  const finish = response.candidates?.[0]?.finishReason;
-  if (response.promptFeedback?.blockReason || GEMINI_BLOCKED.has(finish)) {
-    throw new HearingPrepError(422, 'The AI assistant declined to prepare this sheet.', 'AI_REFUSED');
-  }
-  if (finish === 'MAX_TOKENS') {
-    throw new HearingPrepError(502, 'The AI answer was cut off. Try again with a narrower focus.', 'AI_FAILED');
-  }
-  return { sheet: parseSheet(response.text ?? ''), model: response.modelVersion || model };
-}
-
-/* ───────────────────────── short chat replies (support bot) ───────────────────────── */
-
-/** Lighter Gemini model first for chat: answers come back faster and it is rarely overloaded. */
-const DEFAULT_CHAT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-
-/**
- * One short text reply from the configured provider. `history` is [{ role: 'user' | 'assistant', text }],
- * oldest first, ending with the user's message. Throws HearingPrepError with a stable code.
- */
-export async function chatWithAi(system, history) {
-  const provider = requireProvider();
-  if (provider === 'gemini') {
-    const primary = process.env.SUPPORT_GEMINI_MODEL || DEFAULT_CHAT_GEMINI_MODEL;
-    const fallback = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-    const request = (model) =>
-      geminiClient().models.generateContent({
-        model,
-        contents: history.map((turn) => ({ role: turn.role === 'assistant' ? 'model' : 'user', parts: [{ text: turn.text }] })),
-        config: { systemInstruction: system, maxOutputTokens: 1024 },
-      });
-    let response;
-    try {
-      try {
-        response = await request(primary);
-      } catch (error) {
-        if (!geminiBusy(error) || fallback === primary) throw error;
-        response = await request(fallback);
-      }
-    } catch (error) {
-      if (error instanceof GeminiApiError) {
-        if (error.status === 429 || error.status === 503) throw new HearingPrepError(429, 'The assistant is busy.', 'AI_BUSY');
-        if (error.status === 401 || error.status === 403 || (error.status === 400 && /api key/i.test(error.message))) {
-          throw new HearingPrepError(503, 'The AI key was rejected.', 'AI_NOT_CONFIGURED');
-        }
-        throw new HearingPrepError(502, 'The assistant could not answer.', 'AI_FAILED');
-      }
-      throw error;
-    }
-    if (response.promptFeedback?.blockReason || GEMINI_BLOCKED.has(response.candidates?.[0]?.finishReason)) {
-      throw new HearingPrepError(422, 'The assistant declined.', 'AI_REFUSED');
-    }
-    return (response.text ?? '').trim();
-  }
-
-  let response;
-  try {
-    response = await aiClient().messages.create({
-      model: process.env.SUPPORT_AI_MODEL || process.env.AI_MODEL || DEFAULT_MODEL,
-      max_tokens: 1024,
-      // Short answers about the site do not need deep thinking.
-      output_config: { effort: 'low' },
-      system,
-      messages: history.map((turn) => ({ role: turn.role, content: turn.text })),
-    });
-  } catch (error) {
-    if (error instanceof Anthropic.RateLimitError) throw new HearingPrepError(429, 'The assistant is busy.', 'AI_BUSY');
-    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
-      throw new HearingPrepError(503, 'The AI key was rejected.', 'AI_NOT_CONFIGURED');
-    }
-    if (error instanceof Anthropic.APIError) throw new HearingPrepError(502, 'The assistant could not answer.', 'AI_FAILED');
-    throw error;
-  }
-  if (response.stop_reason === 'refusal') throw new HearingPrepError(422, 'The assistant declined.', 'AI_REFUSED');
-  return response.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('')
-    .trim();
+  const { data, model } = await geminiJson({ system: SYSTEM_PROMPT, user: userMessage, schema: PREP_SCHEMA, maxTokens: 16000 });
+  return { sheet: data, model };
 }
 
 /* ───────────────────────── public API ───────────────────────── */
@@ -588,12 +360,28 @@ export async function generateHearingPrep(actor, caseId, body) {
   const basic = options.mode === 'basic';
   // Fail fast, before reading the case, when an AI sheet is asked for and no key is configured.
   const provider = basic ? null : requireProvider();
+  // An AI sheet counts toward the office's monthly allowance; the free sheet does not.
+  if (!basic) await assertWithinAllowance(actor);
   const file = await collectCaseFile(actor, caseId);
-  const { sheet, model } = basic
-    ? { sheet: buildBasicSheet(file, options), model: BASIC_MODEL }
-    : provider === 'gemini'
-      ? await askGemini(buildUserMessage(file, options))
-      : await askClaude(buildUserMessage(file, options));
+  let sheet;
+  let model;
+  if (basic) {
+    sheet = buildBasicSheet(file, options);
+    model = BASIC_MODEL;
+  } else {
+    // Names, ID numbers, phones and emails are replaced before the file leaves the server,
+    // and put back into the answer here.
+    const redactor = await redactorForCase(actor, caseId);
+    const answer = await askForJson({
+      system: `${SYSTEM_PROMPT}
+
+${PLACEHOLDER_INSTRUCTION}`,
+      user: redactor.redact(buildUserMessage(file, options)),
+      schema: PREP_SCHEMA,
+    });
+    sheet = redactor.restore(answer.data);
+    model = answer.model;
+  }
   const prep = {
     ...verifySheet(sheet, new Set(file.items.map((item) => item.id))),
     sources: Object.fromEntries(file.items.map((item) => [item.id, item.text])),
