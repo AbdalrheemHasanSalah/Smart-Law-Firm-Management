@@ -1,7 +1,7 @@
 /**
  * Arabic text rules shared by the legal library screens and the demo backend. No imports, no
  * DOM: a React Native client reuses it as is. The same rules run on the server
- * (backend/src/services/legalText.js) and in the database (legal_normalize in migration 0016).
+ * (backend/src/services/legalText.js) and in the database (legal_normalize in migration 0018).
  */
 
 const LETTERS_FROM = 'أإآٱىةؤئ٠١٢٣٤٥٦٧٨٩'

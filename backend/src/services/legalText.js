@@ -2,7 +2,7 @@
  * Arabic text rules for the legal library: normalization, search terms, and the periods and
  * penalties quoted from an article. Pure functions, no database.
  *
- * normalizeArabic() must stay identical to legal_normalize() in migration 0016, which builds
+ * normalizeArabic() must stay identical to legal_normalize() in migration 0018, which builds
  * the search index: a word normalized here has to match the same word normalized there.
  */
 

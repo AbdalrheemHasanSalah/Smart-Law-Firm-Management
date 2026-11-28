@@ -11,13 +11,10 @@
 
 ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS stage VARCHAR(20) NOT NULL DEFAULT 'registration';
 ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS mizan_number VARCHAR(60);
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'legal_cases_stage_check') THEN
-        ALTER TABLE legal_cases ADD CONSTRAINT legal_cases_stage_check
-            CHECK (stage IN ('registration', 'preparation', 'hearings', 'judgment', 'appeal', 'execution', 'closed'));
-    END IF;
-END $$;
+-- Plain statements (the migration runner allows no DO blocks); dropping first keeps a re-run safe.
+ALTER TABLE legal_cases DROP CONSTRAINT IF EXISTS legal_cases_stage_check;
+ALTER TABLE legal_cases ADD CONSTRAINT legal_cases_stage_check
+    CHECK (stage IN ('registration', 'preparation', 'hearings', 'judgment', 'appeal', 'execution', 'closed'));
 
 CREATE TABLE IF NOT EXISTS case_stage_history (
     history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

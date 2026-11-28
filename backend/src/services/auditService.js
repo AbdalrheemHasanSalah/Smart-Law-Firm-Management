@@ -122,7 +122,7 @@ export async function listAuditLog(actor, queryParameters = {}) {
 }
 
 /**
- * Checks the office's hash chain (migration 0023). Each entry must follow the one before it with
+ * Checks the office's hash chain (migration 0025). Each entry must follow the one before it with
  * no gap, point to its hash, and still hash to the value it was written with. Reports the first
  * problems found and the chain head, which the owner can note down to compare with later.
  * Entries written before the chain existed are counted but cannot be checked.

@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS legal_cases (
     description TEXT,
     court_id UUID REFERENCES courts(court_id),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
-    -- Where the case stands in its life (migration 0021), and its number in the Mizan system.
+    -- Where the case stands in its life (migration 0023), and its number in the Mizan system.
     stage VARCHAR(20) NOT NULL DEFAULT 'registration',
     mizan_number VARCHAR(60),
     CONSTRAINT legal_cases_stage_check
@@ -887,7 +887,7 @@ CREATE TABLE IF NOT EXISTS case_opponents (
 );
 
 -- 15c. Legal library (المكتبة القانونية): legislation, rulings and the Official Gazette shared by
--- every office, plus each office's saved items, principles and case references. See migration 0016.
+-- every office, plus each office's saved items, principles and case references. See migration 0018.
 CREATE OR REPLACE FUNCTION legal_normalize(input TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     SELECT regexp_replace(
@@ -1054,7 +1054,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_article
 CREATE UNIQUE INDEX IF NOT EXISTS idx_case_legal_references_ruling
     ON case_legal_references(case_id, ruling_id) WHERE ruling_id IS NOT NULL;
 
--- 15d. Case analysis tools: each AI tool run on a case. See migration 0017.
+-- 15d. Case analysis tools: each AI tool run on a case. See migration 0019.
 CREATE TABLE IF NOT EXISTS case_ai_analyses (
     analysis_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
@@ -1076,7 +1076,7 @@ CREATE TABLE IF NOT EXISTS case_ai_analyses (
         REFERENCES legal_cases(office_id, case_id) ON DELETE CASCADE
 );
 
--- 15e. Drafting and printing: letterhead, templates, case drafts, issued documents. See migration 0018.
+-- 15e. Drafting and printing: letterhead, templates, case drafts, issued documents. See migration 0020.
 CREATE TABLE IF NOT EXISTS office_letterheads (
     office_id UUID PRIMARY KEY REFERENCES law_offices(office_id),
     display_name VARCHAR(200),
@@ -1144,7 +1144,7 @@ CREATE TABLE IF NOT EXISTS issued_documents (
         REFERENCES case_drafts(office_id, draft_id) ON DELETE SET NULL (draft_id)
 );
 
--- 15f. Voice recordings attached to messages and case notes. See migration 0019.
+-- 15f. Voice recordings attached to messages and case notes. See migration 0021.
 CREATE TABLE IF NOT EXISTS voice_clips (
     clip_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
@@ -1159,7 +1159,7 @@ CREATE TABLE IF NOT EXISTS voice_clips (
     CONSTRAINT voice_clips_one_place_check CHECK (message_id IS NULL OR note_id IS NULL)
 );
 
--- 15g. Client files, push subscriptions and official notices. See migration 0020.
+-- 15g. Client files, push subscriptions and official notices. See migration 0022.
 CREATE TABLE IF NOT EXISTS shared_files (
     file_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     office_id UUID NOT NULL REFERENCES law_offices(office_id),
@@ -1228,7 +1228,7 @@ CREATE TABLE IF NOT EXISTS notice_deliveries (
     FOREIGN KEY (office_id, notice_id) REFERENCES official_notices(office_id, notice_id) ON DELETE CASCADE
 );
 
--- 15h. Case stage history and fee agreements with installments. See migration 0021.
+-- 15h. Case stage history and fee agreements with installments. See migration 0023.
 CREATE TABLE IF NOT EXISTS case_stage_history (
     history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     office_id UUID NOT NULL,
@@ -1276,7 +1276,7 @@ CREATE TABLE IF NOT EXISTS fee_installments (
     FOREIGN KEY (office_id, agreement_id) REFERENCES fee_agreements(office_id, agreement_id) ON DELETE CASCADE
 );
 
--- 15i. The professional directory and colleague message templates. See migration 0022.
+-- 15i. The professional directory and colleague message templates. See migration 0024.
 CREATE TABLE IF NOT EXISTS court_office_notes (
     office_id UUID NOT NULL REFERENCES law_offices(office_id) ON DELETE CASCADE,
     court_id UUID NOT NULL REFERENCES courts(court_id) ON DELETE CASCADE,
@@ -1311,7 +1311,7 @@ CREATE TABLE IF NOT EXISTS colleague_message_templates (
     updated_at TIMESTAMPTZ
 );
 
--- 15j. Sign-in lockouts and the audit log hash chain. See migration 0023.
+-- 15j. Sign-in lockouts and the audit log hash chain. See migration 0025.
 CREATE TABLE IF NOT EXISTS sign_in_lockouts (
     email VARCHAR(255) PRIMARY KEY,
     failed_count INTEGER NOT NULL DEFAULT 0,
