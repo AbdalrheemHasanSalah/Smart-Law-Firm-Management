@@ -79,7 +79,7 @@ test('opening a thread marks received messages as read and returns them oldest f
   const older = { message_id: 'm1', body: 'first', sent_at: '2026-11-10T10:00:00.000Z' };
   const { query, calls } = fakeDatabase([
     ['AND m.user_id = $3', [contactRow]],
-    ['SELECT message_id', [newer, older]],
+    ['SELECT m.message_id', [newer, older]],
   ]);
   const thread = await getThread(actor('admin'), other, { query });
   assert.deepEqual(thread.messages.map((message) => message.message_id), ['m1', 'm2']);

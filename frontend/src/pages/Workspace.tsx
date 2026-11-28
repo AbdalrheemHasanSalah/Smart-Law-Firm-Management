@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { appendText } from '@/lib/voice'
+import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
 import { Download, Plus, Search, Upload } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -549,7 +551,8 @@ const Notes = ({ caseId }: { caseId: string }) => {
           <ul className="space-y-3">
             {notes.data.map((note) => (
               <li key={note.note_id} className={cn('border-s-4 bg-paper-shade p-4', note.visibility === 'client_visible' ? 'border-stamp-green' : note.visibility === 'internal' ? 'border-ink' : 'border-stamp-blue')}>
-                <p className="leading-relaxed whitespace-pre-wrap text-ink">{note.body}</p>
+                {note.voice && <VoicePlayer clip={note.voice} className="mb-2" />}
+                {note.body && <p className="leading-relaxed whitespace-pre-wrap text-ink">{note.body}</p>}
                 <p className="mt-2 text-xs text-ink-soft">
                   {formatDate(note.created_at)} · {VISIBILITY[note.visibility]?.text}
                 </p>
@@ -566,11 +569,23 @@ const Notes = ({ caseId }: { caseId: string }) => {
         className="h-fit space-y-3 rounded-lg border border-ink/15 p-4"
       >
         <TextArea label="ملاحظة جديدة" name="note" rows={4} required value={body} onChange={(event) => setBody(event.target.value)} />
+        <DictateButton onText={(spoken) => setBody((current) => appendText(current, spoken))} />
         <SelectField label="من يراها؟" name="visibility" options={visibilityOptions} value={visibility} onChange={(event) => setVisibility(event.target.value)} />
         {add.isError && <p role="alert" className="text-sm text-stamp">{messageOf(add.error)}</p>}
         <Button type="submit" variant="ink" disabled={!body.trim() || add.isPending} className="w-full">
           {add.isPending ? 'تُحفظ…' : 'أضف الملاحظة'}
         </Button>
+        <div className="border-t border-rule pt-3">
+          <p className="mb-2 text-xs text-ink-soft">أو سجّل ملاحظة صوتية (حتى دقيقتين)، بالخصوصية المختارة أعلاه:</p>
+          <VoiceRecorder
+            sendLabel="احفظ الملاحظة"
+            onSend={async (clip) => {
+              await api.post(`/cases/${caseId}/notes`, { voice_clip_id: clip.clip_id, visibility, ...(body.trim() ? { body: body.trim() } : {}) })
+              setBody('')
+              void queryClient.invalidateQueries({ queryKey: ['notes', caseId] })
+            }}
+          />
+        </div>
       </form>
     </div>
   )

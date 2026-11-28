@@ -1,4 +1,6 @@
 import { FilePlus2, Lock, Printer, Sparkles, Trash2, Undo2 } from 'lucide-react'
+import { appendText } from '@/lib/voice'
+import { DictateButton } from '@/ui/Voice'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { PATHS, useAuth } from '@/auth/auth'
@@ -112,6 +114,7 @@ const NewDraft = ({ caseId, open, onClose, onCreated }: { caseId: string; open: 
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
+            <DictateButton onText={(spoken) => setDescription((current) => appendText(current, spoken))} />
             <p className="text-xs text-ink-faint">
               تُحجب الأسماء والأرقام قبل الإرسال، وتُحسب من رصيد التحليلات الشهري. الناتج مسودة يراجعها المحامي، وما ينقصها من بيانات يظهر بين أقواس مربعة.
             </p>
@@ -187,6 +190,7 @@ const DraftEditor = ({ caseId, draft, onClosed }: { caseId: string; draft: Draft
             <SelectField label="النوع" name="edit_kind" value={kind} onChange={(event) => setKind(event.target.value as DraftKind)} options={KIND_OPTIONS} />
           </div>
           <TextArea label="نص المستند" name="edit_body" rows={22} className="[&_textarea]:font-doc [&_textarea]:text-lg [&_textarea]:leading-loose" value={body} onChange={(event) => setBody(event.target.value)} />
+          <DictateButton onText={(spoken) => setBody((current) => appendText(current, spoken))} />
           <p className={cn('text-xs', gaps ? 'font-semibold text-stamp' : 'text-ink-faint')}>
             {gaps ? (gaps === 1 ? 'بقيت فجوة واحدة بين أقواس مربعة لتكملها.' : `بقيت ${gaps} فجوات بين أقواس مربعة لتكملها.`) : 'لا فجوات بين أقواس مربعة.'}
           </p>

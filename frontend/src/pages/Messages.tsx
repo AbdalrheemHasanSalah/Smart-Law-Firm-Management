@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { appendText } from '@/lib/voice'
+import { DictateButton, VoicePlayer, VoiceRecorder } from '@/ui/Voice'
 import { ArrowRight, Search, Send, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
@@ -118,7 +120,8 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
                       mine ? 'rounded-ss-md bg-desk text-paper' : 'rounded-se-md bg-white text-ink',
                     )}
                   >
-                    <p className="leading-relaxed whitespace-pre-wrap">{message.body}</p>
+                    {message.voice && <VoicePlayer clip={message.voice} className="mb-1" />}
+                    {message.body && <p className="leading-relaxed whitespace-pre-wrap">{message.body}</p>}
                     <p className={cn('mt-1 text-[0.68rem]', mine ? 'text-paper/60' : 'text-ink-faint')}>
                       {timeOf.format(new Date(message.sent_at))}
                       {mine && (message.read_at ? ' · قُرئت' : ' · أُرسلت')}
@@ -139,6 +142,7 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
           </p>
         )}
         <div className="flex items-end gap-2">
+          <DictateButton onText={(spoken) => setText((current) => appendText(current, spoken))} className="mb-2 self-center" />
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -159,6 +163,14 @@ const Thread = ({ contact, onBack }: { contact: Contact; onBack: () => void }) =
           >
             <Send className="size-5 rtl:-scale-x-100" aria-hidden="true" />
           </button>
+        </div>
+        <div className="mt-2">
+          <VoiceRecorder
+            onSend={async (clip) => {
+              await api.post(`/messages/${contact.user_id}`, { voice_clip_id: clip.clip_id })
+              void queryClient.invalidateQueries({ queryKey: ['messages'] })
+            }}
+          />
         </div>
       </form>
     </div>

@@ -1120,6 +1120,21 @@ CREATE TABLE IF NOT EXISTS issued_documents (
         REFERENCES case_drafts(office_id, draft_id) ON DELETE SET NULL (draft_id)
 );
 
+-- 15f. Voice recordings attached to messages and case notes. See migration 0019.
+CREATE TABLE IF NOT EXISTS voice_clips (
+    clip_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    office_id UUID NOT NULL REFERENCES law_offices(office_id),
+    owner_user_id UUID NOT NULL REFERENCES app_users(user_id),
+    storage_key TEXT NOT NULL UNIQUE,
+    mime_type VARCHAR(30) NOT NULL CHECK (mime_type IN ('audio/webm', 'audio/ogg', 'audio/mp4')),
+    duration_seconds SMALLINT NOT NULL CHECK (duration_seconds BETWEEN 1 AND 120),
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE,
+    note_id UUID REFERENCES case_notes(note_id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT voice_clips_one_place_check CHECK (message_id IS NULL OR note_id IS NULL)
+);
+
 -- 16. Query and foreign-key indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
@@ -1212,3 +1227,7 @@ CREATE INDEX IF NOT EXISTS idx_case_drafts_case ON case_drafts(case_id, updated_
 CREATE INDEX IF NOT EXISTS idx_case_drafts_office_source ON case_drafts(office_id, created_at) WHERE source = 'ai';
 CREATE INDEX IF NOT EXISTS idx_issued_documents_office ON issued_documents(office_id, issued_at DESC);
 CREATE INDEX IF NOT EXISTS idx_issued_documents_draft ON issued_documents(draft_id) WHERE draft_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_clips_message ON voice_clips(message_id) WHERE message_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_clips_note ON voice_clips(note_id) WHERE note_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_voice_clips_unattached ON voice_clips(office_id, created_at)
+    WHERE message_id IS NULL AND note_id IS NULL;

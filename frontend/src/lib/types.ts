@@ -216,6 +216,8 @@ export type CaseNote = {
   created_at: string
   updated_at: string | null
   case_id: string
+  /** A voice note's recording, when it has one (the text may then be empty). */
+  voice?: { clip_id: string; duration_seconds: number } | null
 }
 
 export type DocumentRecord = {
@@ -297,6 +299,8 @@ export type Message = {
   read_at: string | null
   sender_user_id: string
   receiver_user_id: string
+  /** A voice message's recording, when it has one (the text may then be empty). */
+  voice?: { clip_id: string; duration_seconds: number } | null
 }
 
 export type NotificationItem = {

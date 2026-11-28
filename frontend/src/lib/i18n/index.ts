@@ -206,6 +206,9 @@ const PATTERNS: [RegExp, string | ((...groups: string[]) => string)][] = [
   [/^بعد الاعتماد لا يمكن تعديل النص، ويأخذ المستند بصمة ورمز تحقق يُطبع عليه، ويبقى في ملف القضية\.(.*)$/, (_, rest) =>
     `Once final, the text can no longer change; the document gets a fingerprint and a verification code printed on it, and stays in the case file.${
       rest ? ` Note: the text still has ${rest.includes('فجوة واحدة') ? 'one gap' : `${rest.match(/\d+/)?.[0] ?? 'some'} gaps`} in square brackets.` : ''}`],
+  // Voice.
+  [/^رسالة صوتية مدتها (\d+:\d{2})$/, 'Voice message, $1 long'],
+  [/^رسالة صوتية \((\d+:\d{2})\) — لا تُشغَّل في وضع التجربة بعد إعادة تحميل الصفحة$/, 'Voice message ($1): in demo mode it no longer plays after the page reloads'],
   // Parts joined with " · " (a citation, a date and a name…): each part on its own.
   [/^(.+?) · (.+)$/, '$1 · $2'],
   // An office decision is sent as "<office name>: <decision>".

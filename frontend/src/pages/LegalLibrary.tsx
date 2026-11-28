@@ -1,4 +1,6 @@
 import { AlertTriangle, BookMarked, BookOpen, Bookmark, BookmarkCheck, ExternalLink, Gavel, Link2, Newspaper, Plus, Quote, Search, Trash2 } from 'lucide-react'
+import { appendText } from '@/lib/voice'
+import { DictateButton } from '@/ui/Voice'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { PATHS, useAuth } from '@/auth/auth'
@@ -389,6 +391,7 @@ const SearchTab = ({ onOpenArticle }: { onOpenArticle: (articleId: string) => vo
           maxLength={300}
           onChange={(event) => setDraft(event.target.value)}
         />
+        <DictateButton className="mb-2" onText={(spoken) => setDraft((current) => appendText(current, spoken))} />
         <Button type="submit" variant="ink" disabled={draft.trim().length < 2}>
           <Search className="size-4" aria-hidden="true" />
           ابحث

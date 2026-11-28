@@ -469,6 +469,9 @@ const decode = (value: unknown, fallback: string) => {
     return fallback
   }
 }
+/** A demo recording's id carries its length ("vc-ab12cd3-14"), as the demo has no clip store. */
+const demoVoice = (clipId: unknown) =>
+  typeof clipId === 'string' && clipId.startsWith('vc-') ? { clip_id: clipId, duration_seconds: Number(clipId.split('-')[2]) || 1 } : null
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 
 /** Adds a client to the demo office, from the same fields the real backend accepts. */
@@ -587,7 +590,7 @@ const routes: Route[] = [
   }],
   ['post', /^\/cases\/([^/]+)\/notes$/, STAFF, ({ user, params, body }) => {
     const row = caseFor(user, params[0]!)
-    const note: CaseNote = { note_id: uid('n'), case_id: row.case_id, body: String(body.body), visibility: (body.visibility as CaseNote['visibility']) ?? 'case_team', created_at: new Date().toISOString(), updated_at: null }
+    const note: CaseNote = { note_id: uid('n'), case_id: row.case_id, body: String(body.body ?? ''), voice: demoVoice(body.voice_clip_id), visibility: (body.visibility as CaseNote['visibility']) ?? 'case_team', created_at: new Date().toISOString(), updated_at: null }
     notes.push(note)
     return { note }
   }],
@@ -1287,7 +1290,7 @@ const routes: Route[] = [
   }],
   ['post', /^\/messages\/([^/]+)$/, ALL, ({ user, params, body }) => {
     const contact = contactFor(user, params[0]!)
-    const message: Message = { message_id: uid('m'), body: String(body.body).trim(), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
+    const message: Message = { message_id: uid('m'), body: String(body.body ?? '').trim(), voice: demoVoice(body.voice_clip_id), sent_at: new Date().toISOString(), read_at: null, sender_user_id: user.user_id, receiver_user_id: contact.user_id }
     messages.push(message)
     notifications.push({ notification_id: uid('nt'), user_id: contact.user_id, title: 'رسالة جديدة', body: `وصلتك رسالة جديدة من ${user.full_name}.`, notification_type: 'message', read_at: null, created_at: message.sent_at })
     return { message }

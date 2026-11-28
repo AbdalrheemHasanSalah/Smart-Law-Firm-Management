@@ -8,6 +8,7 @@
  * The rule is enforced in SQL on every read and write, so a user ID guessed or taken from
  * another office is answered exactly like one that does not exist.
  */
+import { assertOwnFreeClip, attachClip, publicVoice, VOICE_COLUMNS } from './voiceService.js';
 import { query as databaseQuery } from '../config/db.js';
 import { hasOfficeContext } from './officeScope.js';
 
@@ -127,34 +128,50 @@ export async function getThread(actor, userId, { query = databaseQuery } = {}) {
     parameters
   );
   const result = await query(
-    `SELECT message_id, body, sent_at, read_at, sender_user_id, receiver_user_id
-     FROM messages
-     WHERE office_id = $1
-       AND ((sender_user_id = $2 AND receiver_user_id = $3) OR (sender_user_id = $3 AND receiver_user_id = $2))
-     ORDER BY sent_at DESC, message_id
+    `SELECT m.message_id, m.body, m.sent_at, m.read_at, m.sender_user_id, m.receiver_user_id, ${VOICE_COLUMNS}
+     FROM messages m
+     LEFT JOIN voice_clips v ON v.message_id = m.message_id
+     WHERE m.office_id = $1
+       AND ((m.sender_user_id = $2 AND m.receiver_user_id = $3) OR (m.sender_user_id = $3 AND m.receiver_user_id = $2))
+     ORDER BY m.sent_at DESC, m.message_id
      LIMIT ${THREAD_LIMIT}`,
     parameters
   );
-  return { contact, messages: result.rows.reverse() };
+  const messages = result.rows.map(({ voice_clip_id: _clip, voice_duration_seconds: _seconds, ...row }) => ({ ...row, voice: publicVoice({ voice_clip_id: _clip, voice_duration_seconds: _seconds }) }));
+  return { contact, messages: messages.reverse() };
 }
 
+/**
+ * A text message, a voice message (an uploaded recording's voice_clip_id, see voiceService.js),
+ * or both: a voice message may carry a short text with it.
+ */
 export async function sendMessage(actor, userId, body, { query = databaseQuery } = {}) {
   assertActor(actor);
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => field !== 'body')) {
-    throw new InboxServiceError(400, 'Request body must contain only the message body.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => field !== 'body' && field !== 'voice_clip_id')) {
+    throw new InboxServiceError(400, 'Request body must contain only the message body and an optional recording.');
   }
   const text = typeof body.body === 'string' ? body.body.trim() : '';
-  if (!text || text.length > MAX_MESSAGE_LENGTH) {
-    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters.`);
+  const clipId = body.voice_clip_id ?? null;
+  if (text.length > MAX_MESSAGE_LENGTH || (!text && !clipId)) {
+    throw new InboxServiceError(400, `body must contain 1 to ${MAX_MESSAGE_LENGTH} characters, or a recording must be attached.`);
   }
   const contact = await findContact(actor, userId, query);
+  const duration = clipId ? await assertOwnFreeClip(actor, clipId, query) : null;
   const result = await query(
     `INSERT INTO messages (body, message_type, sender_user_id, receiver_user_id, office_id)
-     VALUES ($1, 'direct', $2, $3, $4)
+     VALUES ($1, '${clipId ? 'voice' : 'direct'}', $2, $3, $4)
      RETURNING message_id, body, sent_at, read_at, sender_user_id, receiver_user_id`,
     [text, actor.user_id, userId, actor.office_id]
   );
-  return { message: result.rows[0], contact };
+  const message = result.rows[0];
+  if (clipId) {
+    if (!(await attachClip(actor, clipId, { messageId: message.message_id }, query))) {
+      await query('DELETE FROM messages WHERE message_id = $1 AND office_id = $2', [message.message_id, actor.office_id]);
+      throw new InboxServiceError(400, 'The recording was not found or is already used.');
+    }
+    return { message: { ...message, voice: { clip_id: clipId, duration_seconds: duration } }, contact };
+  }
+  return { message: { ...message, voice: null }, contact };
 }
 
 export async function countUnreadMessages(actor, { query = databaseQuery } = {}) {

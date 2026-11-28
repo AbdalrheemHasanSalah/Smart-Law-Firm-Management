@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { VoicePlayer } from '@/ui/Voice'
 import { motion } from 'motion/react'
 import { CalendarClock, Download, FileText } from 'lucide-react'
 import { api, DEMO } from '@/lib/api'
@@ -20,7 +21,8 @@ const LatestUpdate = ({ caseId }: { caseId: string }) => {
   if (!latest) return <p className="text-sm text-ink-faint">{notes.isPending ? '…' : 'لم يكتب محاميك تحديثاً بعد.'}</p>
   return (
     <div className="border-s-4 border-stamp bg-paper p-3">
-      <p className="text-sm leading-relaxed text-ink">{latest.body}</p>
+      {latest.voice && <VoicePlayer clip={latest.voice} className="mb-1" />}
+      {latest.body && <p className="text-sm leading-relaxed text-ink">{latest.body}</p>}
       <p className="mt-1 text-xs text-ink-soft">{formatDate(latest.created_at)}</p>
     </div>
   )

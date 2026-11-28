@@ -16,7 +16,7 @@ const ROOT = process.env.DOCUMENT_STORAGE_DIR
   ? path.resolve(process.env.DOCUMENT_STORAGE_DIR)
   : path.resolve(SERVICE_DIRECTORY, '../../private-documents');
 export const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
-const KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|png|jpg)$/i;
+const KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|png|jpg|webm|ogg|m4a)$/i;
 
 const SIGNATURES = [
   { extension: 'pdf', mime: 'application/pdf', bytes: Buffer.from('%PDF-') },
@@ -25,6 +25,26 @@ const SIGNATURES = [
 ];
 
 export const RECEIPT_TYPES = new Set(SIGNATURES.map((entry) => entry.mime));
+
+/**
+ * Voice recordings as browsers make them: WebM/Opus (Chrome, Edge, Firefox), Ogg/Opus (Firefox)
+ * and MP4/AAC (Safari, iOS). `offset` is where the signature starts (MP4 has "ftyp" at byte 4).
+ */
+export const AUDIO_SIGNATURES = [
+  { extension: 'webm', mime: 'audio/webm', bytes: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]) },
+  { extension: 'ogg', mime: 'audio/ogg', bytes: Buffer.from('OggS') },
+  { extension: 'm4a', mime: 'audio/mp4', bytes: Buffer.from('ftyp'), offset: 4 },
+];
+
+/** The type among `signatures` that the buffer starts with, or null. */
+export function detectType(buffer, signatures) {
+  return (
+    signatures.find((entry) => {
+      const start = entry.offset ?? 0;
+      return buffer.length >= start + entry.bytes.length && buffer.subarray(start, start + entry.bytes.length).equals(entry.bytes);
+    }) ?? null
+  );
+}
 
 export class ReceiptError extends Error {
   constructor(status, message, publicCode) {
@@ -40,13 +60,13 @@ export function detectReceiptType(buffer) {
   return SIGNATURES.find((entry) => buffer.length >= entry.bytes.length && buffer.subarray(0, entry.bytes.length).equals(entry.bytes)) ?? null;
 }
 
-export const mimeOfKey = (key) => SIGNATURES.find((entry) => key.toLowerCase().endsWith(`.${entry.extension}`))?.mime ?? 'application/octet-stream';
+export const mimeOfKey = (key) => [...SIGNATURES, ...AUDIO_SIGNATURES].find((entry) => key.toLowerCase().endsWith(`.${entry.extension}`))?.mime ?? 'application/octet-stream';
 
 /**
  * A store of small PDF/PNG/JPG files in its own private folder. `noun` names the file in error
  * messages ("receipt", "scan").
  */
-export function createFileStore({ folder, noun, maxBytes = MAX_RECEIPT_BYTES }) {
+export function createFileStore({ folder, noun, maxBytes = MAX_RECEIPT_BYTES, signatures = SIGNATURES }) {
   const storeDirectory = path.join(ROOT, folder);
   const Noun = noun[0].toUpperCase() + noun.slice(1);
   const megabytes = Math.round(maxBytes / (1024 * 1024));
@@ -76,8 +96,11 @@ export function createFileStore({ folder, noun, maxBytes = MAX_RECEIPT_BYTES }) 
 
   /** Saves a checked file and returns its storage key. */
   async function save(buffer) {
-    const type = detectReceiptType(buffer);
-    if (!type) throw new ReceiptError(415, `The ${noun} must be a PDF, PNG or JPG file.`, 'VALIDATION');
+    const type = detectType(buffer, signatures);
+    if (!type) {
+      const allowed = signatures.map((entry) => entry.extension.toUpperCase()).join(', ');
+      throw new ReceiptError(415, `The ${noun} must be one of: ${allowed}.`, 'VALIDATION');
+    }
     const key = `${randomUUID()}.${type.extension}`;
     const handle = await open(path.join(await directory(), key), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
     try {

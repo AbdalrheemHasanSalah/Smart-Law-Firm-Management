@@ -1925,5 +1925,20 @@
   "يُستعمل عنوان المكتب المسجّل إن تُرك فارغاً": "The registered office address is used if left empty",
   "يُستعمل هاتف المكتب المسجّل إن تُرك فارغاً": "The registered office phone is used if left empty",
   "يُصاغ… قد يستغرق دقيقة": "Drafting… this may take a minute",
-  "قضيتي · نظام إدارة مكاتب المحاماة": "Qadiyati · Law office management system"
+  "قضيتي · نظام إدارة مكاتب المحاماة": "Qadiyati · Law office management system",
+  "ألغِ التسجيل": "Cancel recording",
+  "أنهِ التسجيل": "Stop recording",
+  "أوقف": "Stop",
+  "أوقف الكتابة بالصوت": "Stop dictation",
+  "احذف التسجيل": "Delete the recording",
+  "استمع إلى التسجيل قبل إرساله": "Listen to the recording before sending it",
+  "اسمح للموقع باستعمال الميكروفون لتعمل الكتابة بالصوت.": "Allow the site to use the microphone for dictation to work.",
+  "اكتب بالصوت": "Dictate",
+  "تعذّر الوصول إلى الميكروفون. اسمح للموقع باستعماله من إعدادات المتصفح.": "The microphone could not be reached. Allow the site to use it in the browser settings.",
+  "توقفت الكتابة بالصوت. أعد المحاولة.": "Dictation stopped. Try again.",
+  "رسالة صوتية": "Voice message",
+  "سجّل رسالة صوتية": "Record a voice message",
+  "يعالج المتصفح الصوت عبر خدمة الإملاء لديه (Google في Chrome، وMicrosoft في Edge، وApple في Safari).": "Your browser processes the audio with its own dictation service (Google in Chrome, Microsoft in Edge, Apple in Safari).",
+  "أو سجّل ملاحظة صوتية (حتى دقيقتين)، بالخصوصية المختارة أعلاه:": "Or record a voice note (up to two minutes), with the visibility chosen above:",
+  "احفظ الملاحظة": "Save the note"
 }

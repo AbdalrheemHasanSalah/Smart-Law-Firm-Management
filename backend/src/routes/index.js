@@ -26,6 +26,7 @@ import publicPageRoutes from './publicPageRoutes.js';
 import legalLibraryRoutes from './legalLibraryRoutes.js';
 import caseAnalysisRoutes from './caseAnalysisRoutes.js';
 import draftingRoutes from './draftingRoutes.js';
+import voiceRoutes from './voiceRoutes.js';
 
 const router = Router();
 
@@ -33,6 +34,7 @@ router.use(publicPageRoutes);
 router.use(healthRoutes, sessionRoutes, lawRoutes, officeRoutes, inboxRoutes, subscriptionRoutes, conflictRoutes, supportRoutes);
 router.use(legalLibraryRoutes);
 router.use(draftingRoutes);
+router.use(voiceRoutes);
 router.use('/clients', clientRoutes);
 router.use('/cases', caseAnalysisRoutes);
 router.use('/cases', caseRoutes);

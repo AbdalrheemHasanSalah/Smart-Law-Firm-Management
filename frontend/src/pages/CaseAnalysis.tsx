@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
+import { appendText } from '@/lib/voice'
+import { DictateButton } from '@/ui/Voice'
 import { ChevronDown, ListPlus, ShieldCheck, Sparkles } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/auth/auth'
@@ -265,7 +267,10 @@ const RunForm = ({ caseId, tool, onDone }: { caseId: string; tool: ToolKey; onDo
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-ink-soft">{spec.note}</p>
       {spec.question !== 'none' && (
-        <TextArea label={spec.questionLabel ?? 'السؤال'} name="analysis_question" rows={2} maxLength={MAX_QUESTION} required={spec.question === 'required'} value={question} onChange={(event) => setQuestion(event.target.value)} />
+        <div>
+          <TextArea label={spec.questionLabel ?? 'السؤال'} name="analysis_question" rows={2} maxLength={MAX_QUESTION} required={spec.question === 'required'} value={question} onChange={(event) => setQuestion(event.target.value)} />
+          <DictateButton className="mt-1" onText={(spoken) => setQuestion((current) => appendText(current, spoken))} />
+        </div>
       )}
       {spec.text !== 'none' && (
         <div>
