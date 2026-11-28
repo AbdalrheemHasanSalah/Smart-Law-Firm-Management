@@ -189,7 +189,8 @@ export function reminderMessage(row, timeZone) {
       return {
         title: 'تذكير: موعد اليوم',
         body: `لديك ${APPOINTMENT_NAMES[row.detail] ?? 'موعد'}${inCase} اليوم الساعة ${time}.`,
-        path: '/office/calendar', button: 'افتح التقويم',
+        // The calendar opens on the appointment's day (local, like the reminder itself).
+        path: `/office/calendar?day=${localClock(new Date(row.at), timeZone).day}`, button: 'افتح التقويم',
       };
     case 'poa': {
       const days = Number(row.days_left);
@@ -226,9 +227,9 @@ export function defaultChannels({ query, sendMail }) {
       name: 'in_app',
       async deliver({ person, officeId, message }) {
         await query(
-          `INSERT INTO notifications (title, body, notification_type, user_id, office_id)
-           VALUES ($1, $2, 'reminder', $3, $4)`,
-          [message.title, message.body, person.user_id, officeId]
+          `INSERT INTO notifications (title, body, notification_type, user_id, office_id, link_path)
+           VALUES ($1, $2, 'reminder', $3, $4, $5)`,
+          [message.title, message.body, person.user_id, officeId, message.path]
         );
         return true;
       },

@@ -109,7 +109,9 @@ CREATE TABLE IF NOT EXISTS law_offices (
     -- Paid (or trial) access runs until this moment; NULL means no subscription is tracked.
     subscription_ends_at TIMESTAMPTZ,
     -- The subscription_ends_at value a renewal reminder was last sent for.
-    subscription_reminder_sent_for TIMESTAMPTZ
+    subscription_reminder_sent_for TIMESTAMPTZ,
+    -- When a platform administrator first opened this office's request (NULL: not opened yet).
+    platform_seen_at TIMESTAMPTZ
 );
 
 -- Office subscription payments: recorded by the platform owner, or paid online by the office.
@@ -290,6 +292,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     title VARCHAR(200) NOT NULL,
     body TEXT NOT NULL,
     notification_type VARCHAR(50) NOT NULL,
+    -- the page the notification opens (an internal path, set by the server)
+    link_path VARCHAR(300),
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id UUID NOT NULL REFERENCES app_users(user_id),

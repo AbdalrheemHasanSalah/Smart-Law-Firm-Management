@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from './kit'
 
 /**
- * Law photography, all free to use under the Unsplash License (https://unsplash.com/license).
+ * Law photography, all free to use under the Unsplash License (https://unsplash.com/license),
+ * which does not require showing a credit on the page; `credit` keeps a record of who took each.
  * Served from Unsplash's CDN, resized on the fly.
  */
 export const LAW_PHOTOS = [
@@ -96,9 +97,6 @@ export const Slideshow = ({ controls = true, className }: { controls?: boolean; 
           </button>
         </div>
       )}
-      <p className="absolute bottom-2 left-3 z-20 text-[0.65rem] text-paper/45" dir="ltr">
-        Photo: {photo.credit} / Unsplash
-      </p>
     </div>
   )
 }
@@ -206,9 +204,6 @@ export const PhotoWindow = ({ className }: { className?: string }) => {
           transition={{ duration: paused ? 0 : 5, ease: 'linear' }}
           className="absolute inset-x-0 top-0 h-1 origin-right ltr:origin-left bg-stamp"
         />
-        <p className="absolute top-3 left-4 text-[0.65rem] text-paper/60" dir="ltr">
-          Photo: {photo.credit} / Unsplash
-        </p>
       </div>
     </div>
   )

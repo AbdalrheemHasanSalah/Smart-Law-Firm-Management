@@ -2240,5 +2240,13 @@
   "أُدخلت كلمة مرور خاطئة خمس مرات، فأوقفنا الدخول إلى هذا الحساب مؤقتاً لحمايته. حاول بعد قليل، أو عيّن كلمة مرور جديدة من «نسيت كلمة المرور» فيُرفع الإيقاف فوراً.": "A wrong password was entered five times, so sign-in to this account is paused for a while to protect it. Try again later, or set a new password from “Forgot password”, which lifts the pause at once.",
   "دورك في المكتب لا يسمح بهذا الإجراء. تواصل مع صاحب المكتب إن احتجته.": "Your role in the office does not allow this action. Ask the office owner if you need it.",
   "صلاحيات صاحب المكتب لا تُعدَّل.": "The office owner's permissions cannot be changed.",
-  "لم تجتز النسخة الفحص فلم تُسلَّم. حاول مرة أخرى.": "The copy failed its check, so it was not handed over. Try again."
+  "لم تجتز النسخة الفحص فلم تُسلَّم. حاول مرة أخرى.": "The copy failed its check, so it was not handed over. Try again.",
+  "مسح الكل": "Clear all",
+  "المزيد من الأقسام": "More sections",
+  "طلب مكتب جديد": "New office request",
+  "لا طلبات جديدة.": "No new requests.",
+  "لم تفتحها بعد": "Not opened yet",
+  "بانتظار قرارك": "Awaiting your decision",
+  "طلب جديد واحد لم تفتحه بعد": "One new request you haven't opened yet",
+  "طلبان جديدان لم تفتحهما بعد": "Two new requests you haven't opened yet"
 }

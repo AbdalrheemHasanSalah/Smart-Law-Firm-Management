@@ -36,7 +36,7 @@ export async function listOffices(actor, queryParameters = {}) {
   const result = await query(
     `SELECT office.office_id, office.name, office.email, office.personal_email, office.phone, office.city, office.address,
             office.license_number, office.status, office.review_note, office.reviewed_at,
-            office.created_at, owner.user_id AS owner_user_id, owner.full_name AS owner_name,
+            office.created_at, office.platform_seen_at, owner.user_id AS owner_user_id, owner.full_name AS owner_name,
             owner.email AS owner_email, owner.status AS owner_account_status,
             profile.bar_number AS owner_bar_number, profile.license_status AS owner_license_status
        FROM law_offices office
@@ -48,6 +48,26 @@ export async function listOffices(actor, queryParameters = {}) {
     [status ?? null]
   );
   return result.rows;
+}
+
+/**
+ * Marks office requests as opened by the platform: one office, or (without an id) every pending
+ * request at once ("clear all"). Only the first opening is recorded.
+ */
+export async function markOfficesSeen(actor, officeId = null, { query: run = query } = {}) {
+  assertPlatformAdmin(actor);
+  if (officeId !== null && (typeof officeId !== 'string' || !UUID_PATTERN.test(officeId))) {
+    invalid('officeId must be a valid UUID.');
+  }
+  const result = officeId
+    ? await run(
+      'UPDATE law_offices SET platform_seen_at = NOW() WHERE office_id = $1 AND platform_seen_at IS NULL',
+      [officeId]
+    )
+    : await run(
+      "UPDATE law_offices SET platform_seen_at = NOW() WHERE status = 'pending' AND platform_seen_at IS NULL"
+    );
+  return { updated: result.rowCount ?? 0 };
 }
 
 /**

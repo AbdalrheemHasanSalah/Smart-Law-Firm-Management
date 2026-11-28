@@ -9,6 +9,7 @@ const {
   getThread,
   listContacts,
   listNotifications,
+  markNotificationRead,
   markNotificationsRead,
   sendMessage,
 } = await import('../src/services/inboxService.js');
@@ -132,16 +133,72 @@ test('notifications and counts are read for the actor in the active office only'
   }
 });
 
-test('a new message notifies its receiver with a link to their own area', async () => {
+test('a new message notifies its receiver with a link to the conversation in their own area', async () => {
   const receiver = { user_id: other, email: 'other@example.com', full_name: 'Other' };
   const mails = [];
+  const inserts = [];
   const dependencies = {
-    query: async (sql) => (sql.includes('m.user_id = $2') ? { rows: [receiver] } : { rows: [], rowCount: 1 }),
+    query: async (sql, parameters) => {
+      if (sql.includes('INSERT INTO notifications')) inserts.push(parameters);
+      return sql.includes('m.user_id = $2') ? { rows: [receiver] } : { rows: [], rowCount: 1 };
+    },
     sendMail: async (mail) => mails.push(mail),
   };
   await notify('message.received', { officeId, actorUserId: me, userId: other, receiverRole: 'client', senderName: 'Lina' }, dependencies);
   assert.equal(mails.length, 1);
   assert.equal(mails[0].to, 'other@example.com');
   assert.match(mails[0].text, /Lina/);
-  assert.match(mails[0].text, /\/portal\/messages$/);
+  assert.ok(mails[0].text.endsWith(`/portal/messages?with=${me}`));
+  // the in-app notification opens the same conversation
+  assert.equal(inserts.length, 1);
+  assert.equal(inserts[0][5], `/portal/messages?with=${me}`);
+});
+
+test('the list carries where each notification leads, and opening one marks only it read', async () => {
+  const notificationId = '7f3e2d1c-0b9a-4c8d-9e7f-6a5b4c3d2e1f';
+  const { query, calls } = fakeDatabase([['UPDATE notifications', [{}]]]);
+  await listNotifications(actor('lawyer'), { query });
+  assert.match(calls[0].sql, /link_path/);
+
+  calls.length = 0;
+  assert.deepEqual(await markNotificationRead(actor('lawyer'), notificationId, { query }), { updated: 1 });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /WHERE notification_id = \$1 AND office_id = \$2 AND user_id = \$3 AND read_at IS NULL/);
+  assert.deepEqual(calls[0].parameters, [notificationId, officeId, me]);
+
+  calls.length = 0;
+  await assert.rejects(markNotificationRead(actor('lawyer'), 'not-a-uuid', { query }), { status: 400 });
+  await assert.rejects(markNotificationRead({ user_id: me, role: 'lawyer' }, notificationId, { query }), { status: 403 });
+  assert.equal(calls.length, 0, 'nothing is written for a refused request');
+});
+
+test('clear all removes only the actor notifications in the active office', async () => {
+  const { clearNotifications } = await import('../src/services/inboxService.js');
+  const calls = [];
+  const query = async (sql, parameters) => {
+    calls.push({ sql, parameters });
+    return { rowCount: 3, rows: [] };
+  };
+  assert.deepEqual(await clearNotifications(actor('lawyer'), { query }), { deleted: 3 });
+  assert.match(calls[0].sql, /^DELETE FROM notifications WHERE office_id = \$1 AND user_id = \$2$/);
+  assert.deepEqual(calls[0].parameters, [officeId, me]);
+  await assert.rejects(clearNotifications({ user_id: me, role: 'lawyer' }, { query }), { status: 403 });
+});
+
+test('opening an office request marks it seen once; clear all marks every pending request', async () => {
+  const { markOfficesSeen } = await import('../src/services/platformService.js');
+  const platformAdmin = { user_id: me, is_platform_admin: true };
+  const calls = [];
+  const query = async (sql, parameters) => {
+    calls.push({ sql, parameters });
+    return { rowCount: 1, rows: [] };
+  };
+  assert.deepEqual(await markOfficesSeen(platformAdmin, other, { query }), { updated: 1 });
+  assert.match(calls[0].sql, /WHERE office_id = \$1 AND platform_seen_at IS NULL/);
+  assert.deepEqual(calls[0].parameters, [other]);
+  await markOfficesSeen(platformAdmin, null, { query });
+  assert.match(calls[1].sql, /WHERE status = 'pending' AND platform_seen_at IS NULL/);
+  await assert.rejects(markOfficesSeen({ user_id: me, is_platform_admin: false }, other, { query }), { status: 403 });
+  await assert.rejects(markOfficesSeen(platformAdmin, 'not-a-uuid', { query }), { status: 400 });
+  assert.equal(calls.length, 2);
 });
